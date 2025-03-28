@@ -6,3 +6,6 @@ CIF_files
 /CIF_and_example_generation/CIF_files.zip
 models/xrd_diffusion
 *.png
+/myenv/
+/wandb/
+xrd_classifier_model.pth
