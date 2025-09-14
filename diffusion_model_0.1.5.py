@@ -786,6 +786,74 @@ def train_model(model, diffusion, train_dataloader, val_dataloader,
     return history, model
 
 
+def plot_overlay_sample(model, diffusion, synth_pattern, real_pattern, temp, 
+                        t_choice, two_theta_axis=None, save_path=None, title_suffix=""):
+    """
+    Plot (1) clean synthetic pattern, (2) noisy version at timestep t_choice,
+    and (3) denoised output at that same t_choice. Optionally includes the real (measured)
+    pattern for reference.
+    
+    Arguments:
+        model         : your trained ImprovedDiffusionDenoiser (in eval mode)
+        diffusion     : your DiffusionProcess instance
+        synth_pattern : a single-sample tensor of shape [1, 1, L] (synthetic ground truth)
+        real_pattern  : a single-sample tensor of shape [1, 1, L] (experimental/noisy measurement)
+        temp          : a single-sample tensor of shape [1, 1] (temperature/conditioning scalar)
+        t_choice      : integer timestep at which to add noise & denoise
+        two_theta_axis: optional 1-D numpy array of length L for x-axis (°2θ). If None, use indices.
+        save_path     : optional string path to save the figure (PNG). If None, does not save.
+        title_suffix  : optional string to append to plot title (e.g. epoch number).
+    """
+    model.eval()
+    device = next(model.parameters()).device
+    L = synth_pattern.shape[-1]
+    
+    # Move all to device
+    x0 = synth_pattern.to(device)          # [1,1,L]
+    real = real_pattern.to(device)         # [1,1,L]
+    t = torch.tensor([t_choice], device=device, dtype=torch.long)  # [1]
+    temp_in = temp.to(device)              # [1,1]
+    
+    # 1) Create noisy synthetic at timestep t_choice
+    with torch.no_grad():
+        noisy_x, noise = diffusion.forward_diffusion(x0, t)
+        # 2) Denoise that noisy_x 
+        noise_pred = model(noisy_x, t, temp_in)                        # predict noise
+        alpha_bar_t = diffusion.alpha_bars[t].view(1, 1, 1)            # [1,1,1]
+        x0_pred = (noisy_x - torch.sqrt(1 - alpha_bar_t) * noise_pred) / torch.sqrt(alpha_bar_t)
+        denoised = x0_pred.clamp(0, None)  # clamp if intensities must be ≥ 0
+    
+    # Convert to NumPy for plotting
+    clean_np    = x0.cpu().numpy().reshape(-1)        # length L
+    noisy_np    = noisy_x.cpu().numpy().reshape(-1)   # length L
+    denoised_np = denoised.cpu().numpy().reshape(-1)  # length L
+    real_np     = real.cpu().numpy().reshape(-1)      # length L
+    
+    # Prepare x-axis
+    if two_theta_axis is None:
+        x_axis = np.arange(L)
+    else:
+        x_axis = two_theta_axis
+    
+    plt.figure(figsize=(8, 5))
+    plt.plot(x_axis, clean_np,    label="Synthetic (clean)",     color="black", linewidth=1.5)
+    plt.plot(x_axis, noisy_np,    label=f"Noisy (t={t_choice})",   color="tab:gray", alpha=0.6, linewidth=1)
+    plt.plot(x_axis, denoised_np, label="Denoised at t",          color="tab:red",  alpha=0.8, linewidth=1)
+    # Optionally overlay real (measured) pattern:
+    plt.plot(x_axis, real_np,     label="Real (experimental)",    color="tab:blue", alpha=0.4, linewidth=1)
+    
+    plt.title(f"Overlay: clean vs noisy vs denoised {title_suffix}".strip())
+    plt.xlabel("Position (°2θ)" if two_theta_axis is not None else "Index")
+    plt.ylabel("Intensity (a.u.)")
+    plt.legend()
+    plt.tight_layout()
+    
+    if save_path is not None:
+        plt.savefig(save_path, dpi=300)
+    plt.show()
+    plt.close()
+
+
 # Main execution function
 def main():
     """
@@ -802,12 +870,12 @@ def main():
     # Hyperparameters
     num_timesteps = 1000
     hidden_channels = 16  # Reduced from 64 to avoid memory issues
-    time_embedding_dim = 128
-    num_res_blocks = 1
+    time_embedding_dim = 256
+    num_res_blocks = 2
     attention_levels = [1,2]  # Reduced from [1,2] to simplify model
-    num_levels = 1
+    num_levels = 2
     batch_size = 8  # Reduced from 32 to fit in memory
-    num_epochs = 20
+    num_epochs = 10
     lr = 1e-4
     weight_decay = 1e-5
     save_path = "./models/xrd_diffusion"
@@ -823,7 +891,7 @@ def main():
     global_temperature = dataset_dict["fast_dtw_distance"]
     print(f"Loaded dataset with {len(synth_xrd)} samples")
    
-    sample_limit = 1000
+    sample_limit = 500
     synth_xrd = synth_xrd[:sample_limit]
     real_xrd = real_xrd[:sample_limit]
     global_temperature = global_temperature[:sample_limit]
@@ -905,7 +973,35 @@ def main():
         save_path=save_path,
         num_timesteps=num_timesteps
     )
-    
+    '''
+        sample_idx = 0
+
+    # Fetch a batch from the test dataloader
+    synth_batch, real_batch, temp_batch = next(iter(test_dataloader))
+    synth_batch = synth_batch.to(device)
+    real_batch = real_batch.to(device)
+    temp_batch = temp_batch.to(device)
+
+    synth_example = synth_batch[sample_idx:sample_idx+1]  # shape [1,1,L]
+    real_example  = real_batch[sample_idx:sample_idx+1]   # shape [1,1,L]
+    temp_example  = temp_batch[sample_idx:sample_idx+1]   # shape [1,1]
+
+    t_vis = diffusion.num_timesteps // 1
+
+    plot_overlay_sample(
+        model=trained_model,
+        diffusion=diffusion,
+        synth_pattern=synth_example,
+        real_pattern=real_example,
+        temp=temp_example,
+        t_choice=t_vis,
+        two_theta_axis=None,                 
+        save_path="overlay.png",
+        title_suffix=f"(step {t_vis})"
+    )
+
+    '''
+
     # Evaluate on test set
     print("\nEvaluating on test set...")
     model.eval()
@@ -965,29 +1061,28 @@ def plot_training_history(history, save_path):
     """
     Plot the training history metrics.
     """
-    plt.figure(figsize=(12, 10))
+    plt.figure(figsize=(12, 12))
     
     # Plot 1: Overall Loss
     plt.subplot(2, 1, 1)
     plt.plot(history['train_loss'], label='Training Loss')
     plt.plot(history['val_loss'], label='Validation Loss')
-    plt.title('Training and Validation Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
+    plt.title('Training and Validation Loss', fontsize=16)
+    plt.xlabel('Epoch', fontsize=18)
+    plt.ylabel('MSE Loss', fontsize=18)
+    plt.legend(fontsize=16)
     plt.grid(True, alpha=0.3)
     
     # Plot 2: Loss Components
     plt.subplot(2, 1, 2)
     plt.plot(history['diff_loss'], label='Diffusion Loss')
     plt.plot(history['recon_loss'], label='Reconstruction Loss')
-    plt.title('Loss Components')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
+    plt.title('Loss Components', fontsize=16)
+    plt.xlabel('Epoch', fontsize=18)
+    plt.ylabel('MSE Loss', fontsize=18)
+    plt.legend(fontsize=16)
     plt.grid(True, alpha=0.3)
     
-    plt.tight_layout()
     plt.savefig(f"{save_path}/training_history.png", dpi=300)
     plt.close()
 
@@ -1044,49 +1139,58 @@ def visualize_progress(model, diffusion, dataloader, epoch, device, save_path, n
         denoised_high = (noisy_high - torch.sqrt(1 - alpha_bar_high) * noise_pred_high) / torch.sqrt(alpha_bar_high)
             
     # Create visualization
-    fig, axs = plt.subplots(2, 2, figsize=(16, 12))
+    fig, axs = plt.subplots(3, 1, figsize=(12, 28), constrained_layout=True) # Changed from 2,2 to 4,1
     
+    L_vis = synth_batch.shape[-1] # Get length from one of the patterns
+    two_theta = np.linspace(0, 90, L_vis)
+
+
     # Plot 1: Real vs Denoised Real vs Synthetic (Ground Truth)
-    axs[0, 0].plot(synth_batch[sample_idx, 0].cpu().numpy(), label='Synthetic (Ground Truth)', color='black', linewidth=1.5)
-    axs[0, 0].plot(real_batch[sample_idx, 0].cpu().numpy(), label='Real (Noisy)', color='blue', alpha=0.7, linewidth=1)
-    axs[0, 0].plot(denoised_real[0, 0].cpu().numpy(), label='Denoised Real', color='red', linewidth=0.5)
-    axs[0, 0].set_title(f'Real Data Denoising - Temperature: {temp_batch[sample_idx, 0].item():.4f}')
-    axs[0, 0].legend()
-    axs[0, 0].set_xlabel('Position (2θ)')
-    axs[0, 0].set_ylabel('Intensity')
+    axs[0].plot(two_theta, synth_batch[sample_idx, 0].cpu().numpy(), label='Synthetic (Ground Truth)', color='grey', linewidth=6)
+    axs[0].plot(two_theta, real_batch[sample_idx, 0].cpu().numpy(), label='Real (Noisy)', color='blue', linestyle = "--" , alpha=0.7, linewidth=4)
+    axs[0].plot(two_theta, denoised_real[0, 0].cpu().numpy(), label='Denoised Real', color='green', linestyle = "-.", linewidth=2)
+    axs[0].set_title(f'Real Data Denoising', fontsize=18)
+    axs[0].legend(fontsize=16)
+    axs[0].set_xlabel('Position (2θ)', fontsize=18)
+    axs[0].set_ylabel('Intensity', fontsize=18)
+    axs[0].grid(True, alpha=0.3)
     
     # Plot 2: Noise Level Analysis
-    axs[0, 1].plot(synth_batch[sample_idx, 0].cpu().numpy(), label='Original Synthetic', color='black', linewidth=1.5)
-    axs[0, 1].plot(noisy_mid[0, 0].cpu().numpy(), label=f'Noisy (t={t_mid.item()})', color='gray', alpha=0.5)
-    axs[0, 1].plot(denoised_mid[0, 0].cpu().numpy(), label='Denoised', color='red', linewidth=0.5)
-    axs[0, 1].set_title('Noise Level Analysis')
-    axs[0, 1].legend()
-    axs[0, 1].set_xlabel('Position (2θ)')
-    axs[0, 1].set_ylabel('Intensity')
+    axs[1].plot(two_theta, noisy_mid[0, 0].cpu().numpy(), label=f'Noisy (t={t_mid.item()})', color='gray', alpha=0.5)
+    axs[1].plot(two_theta, denoised_mid[0, 0].cpu().numpy(), label='Denoised', color='red', linewidth=0.5)
+    axs[1].set_title('Noise Level Analysis', fontsize=18)
+    axs[1].legend(fontsize=16)
+    axs[1].set_xlabel('Position (2θ)', fontsize=18)
+    axs[1].set_ylabel('Intensity', fontsize=18)
+    axs[1].grid(True, alpha=0.3)
     
     # Plot 3: Error Analysis for Real Data Denoising
-    error = np.abs(denoised_real[0, 0].cpu().numpy() - synth_batch[sample_idx, 0].cpu().numpy())
-    axs[1, 0].plot(error, color='red', label='|Denoised Real - Synthetic|')
-    axs[1, 0].set_title('Absolute Error')
-    axs[1, 0].set_xlabel('Position (2θ)')
-    axs[1, 0].set_ylabel('Error Magnitude')
-    axs[1, 0].legend()
+    
+    # error = np.abs(denoised_real[0, 0].cpu().numpy() - synth_batch[sample_idx, 0].cpu().numpy())
+    # axs[2].plot(two_theta, error, color='red', label='|Denoised Real - Synthetic|')
+    # axs[2].set_title('Absolute Error')
+    # axs[2].set_xlabel('Position (2θ)')
+    # axs[2].set_ylabel('Error Magnitude')
+    # axs[2].legend()
+    # axs[2].grid(True, alpha=0.3)
     
     # Plot 4: Progressive Denoising at Different Noise Levels
-    axs[1, 1].plot(synth_batch[sample_idx, 0].cpu().numpy(), label='Ground Truth', color='black', linewidth=1.5)
-    axs[1, 1].plot(denoised_low[0, 0].cpu().numpy(), label=f'Low Noise (t={t_low.item()})', color='green', alpha=0.7)
-    axs[1, 1].plot(denoised_mid[0, 0].cpu().numpy(), label=f'Mid Noise (t={t_mid.item()})', color='orange', alpha=0.7)
-    axs[1, 1].plot(denoised_high[0, 0].cpu().numpy(), label=f'High Noise (t={t_high.item()})', color='red', alpha=0.7)
-    axs[1, 1].set_title('Progressive Denoising')
-    axs[1, 1].legend()
-    axs[1, 1].set_xlabel('Position (2θ)')
-    axs[1, 1].set_ylabel('Intensity')
+    axs[2].plot(two_theta, denoised_high[0, 0].cpu().numpy(), label=f'High Noise (t={t_high.item()})', color='red', alpha=0.7)
+    axs[2].plot(two_theta, denoised_mid[0, 0].cpu().numpy(), label=f'Mid Noise (t={t_mid.item()})', color='orange', alpha=0.7)
+    axs[2].plot(two_theta, denoised_low[0, 0].cpu().numpy(), label=f'Low Noise (t={t_low.item()})', color='green', alpha=0.7)
+    axs[2].plot(two_theta, synth_batch[sample_idx, 0].cpu().numpy(), label='Ground Truth', color='black', linewidth=1.5)
+    axs[2].set_title('Progressive Denoising', fontsize=18)
+    axs[2].legend( fontsize=16)
+    axs[2].set_xlabel('Position (2θ)', fontsize=18)
+    axs[2].set_ylabel('Intensity', fontsize=18)
+    axs[2].grid(True, alpha=0.3)
     
-    plt.suptitle(f'XRD Diffusion Model - Epoch {epoch+1}', fontsize=16)
-    plt.tight_layout()
+    #plt.suptitle(f'XRD Diffusion Model - Epoch {epoch+1}', fontsize=16)
+    #plt.tight_layout()
     
     # Save figure
     plt.savefig(f"{save_path}/progress_epoch_{epoch+1}.png", dpi=300)
     plt.close()
+
 
 main()
