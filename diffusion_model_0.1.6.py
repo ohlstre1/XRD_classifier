@@ -204,38 +204,39 @@ class UpBlock(nn.Module):
     """
     def __init__(self, in_channels, out_channels, time_channels, num_res_blocks=2, attention=False):
         super().__init__()
-        
+
+        # Upsampling first
+        self.upsample = nn.ConvTranspose1d(
+            in_channels,
+            out_channels,
+            kernel_size=4,
+            stride=2,
+            padding=1,
+            output_padding=0
+        )
+
         # Residual blocks with time conditioning
         self.res_blocks = nn.ModuleList()
-        
-        # Manage channel dimensions correctly
-        for i in range(num_res_blocks):
-            channels = in_channels if i == 0 else out_channels
-            self.res_blocks.append(ResidualBlock(channels, out_channels, time_channels))
-        
+
+        # All blocks use out_channels since upsampling is done first
+        for _ in range(num_res_blocks):
+            self.res_blocks.append(ResidualBlock(out_channels, out_channels, time_channels))
+
         # Attention blocks
         self.attentions = nn.ModuleList([
             Attention(out_channels) if attention else nn.Identity()
             for _ in range(num_res_blocks)
         ])
-        
-        # Upsampling - use output_padding=1 to ensure proper size matching with skip connections
-        self.upsample = nn.ConvTranspose1d(
-            out_channels, 
-            out_channels, 
-            kernel_size=4, 
-            stride=2, 
-            padding=1,
-            output_padding=0  # Use 0 as default, but may need to be 1 in some cases
-        )
-        
+
     def forward(self, x, time_emb):
+        # Upsample first
+        x = self.upsample(x)
+
+        # Then process with residual blocks
         for res_block, attn in zip(self.res_blocks, self.attentions):
             x = res_block(x, time_emb)
             x = attn(x)
-        
-        # Upsample
-        x = self.upsample(x)
+
         return x
 # -------------------------------
 # Diffusion Model
@@ -271,7 +272,6 @@ class ImprovedDiffusionDenoiser(nn.Module):
         # Encoder (downsampling)
         self.downs = nn.ModuleList()
         
-        ch = hidden_channels
         input_channels = [hidden_channels]
         
         # Calculate channels at each level
@@ -307,10 +307,14 @@ class ImprovedDiffusionDenoiser(nn.Module):
         
         # Build decoder blocks (reversed)
         for i in reversed(range(num_levels)):
-            in_ch = input_channels[i+1] * 2  # *2 for skip connections
+            # For the first upsampling block, no skip connection yet
+            if i == num_levels - 1:
+                in_ch = input_channels[i+1]
+            else:
+                in_ch = input_channels[i+1] + input_channels[i]  # Current + skip connection
             out_ch = input_channels[i]
             is_attention = i in attention_levels
-            
+
             self.ups.append(
                 UpBlock(
                     in_channels=in_ch,
@@ -332,51 +336,56 @@ class ImprovedDiffusionDenoiser(nn.Module):
         """
         # Time embedding
         t_emb = self.time_embed(t)
-        
+
         # Add temperature conditioning if enabled and provided
         if self.temperature_condition and temperature is not None:
             temp_emb = self.temp_embed(temperature)
             t_emb = t_emb + temp_emb
-        
+
         # Initial convolution
         h = self.conv_in(x)
-        
-        # Store skip connections
-        skips = [h]
-        
+
+        # Store skip connections - fix indexing issue
+        skips = []
+
         # Encoder (downsampling)
         for down_block in self.downs:
+            skips.append(h)  # Store before downsampling
             h = down_block(h, t_emb)
-            skips.append(h)
-        
+
         # Middle block
         h = self.middle(h, t_emb)
-        
+
         # Decoder (upsampling) with skip connections
-        for up_block in self.ups:
-            # Use skip connection (take from end of list)
-            skip = skips.pop()
-            
-            # Fix for dimension mismatch: Resize h to match skip if needed
-            if h.shape[2] != skip.shape[2]:
-                # Adjust h size to match skip size
-                h = F.interpolate(h, size=skip.shape[2], mode='linear', align_corners=False)
-            
-            h = torch.cat([h, skip], dim=1)
+        for i, up_block in enumerate(self.ups):
+            # First pass through upsampling block
             h = up_block(h, t_emb)
-        
+
+            # Then add skip connection if available (except for the last block)
+            if i < len(self.ups) - 1:
+                skip_idx = len(skips) - 1 - i
+                if skip_idx >= 0 and skip_idx < len(skips):
+                    skip = skips[skip_idx]
+
+                    # Fix for dimension mismatch: Resize h to match skip if needed
+                    if h.shape[2] != skip.shape[2]:
+                        # Adjust h size to match skip size
+                        h = F.interpolate(h, size=skip.shape[2], mode='linear', align_corners=False)
+
+                    h = torch.cat([h, skip], dim=1)
+
         # Final output
         h = self.norm_out(h)
         h = self.act_out(h)
         output = self.conv_out(h)
-        
+
         return output
     
 # -------------------------------
 # Diffusion Process
 # -------------------------------    
 class DiffusionProcess:
-    def __init__(self, num_timesteps=1000, schedule_type='cosine', beta_start=1e-4, beta_end=10, 
+    def __init__(self, num_timesteps=1000, schedule_type='cosine', beta_start=1e-4, beta_end=0.02,
                  device='cpu', wavelength=1.54056, min_crystallite_size=5, max_crystallite_size=100):
         self.num_timesteps = num_timesteps
         self.device = device
@@ -391,14 +400,14 @@ class DiffusionProcess:
         if schedule_type == 'linear':
             self.betas = torch.linspace(beta_start, beta_end, num_timesteps).to(device)
         elif schedule_type == 'cosine':
-            self.betas = self.cosine_beta_schedule(num_timesteps).to(device)
+            self.betas = self.cosine_beta_schedule(num_timesteps, beta_start, beta_end).to(device)
         else:
             raise ValueError(f"Unknown schedule type: {schedule_type}")
             
         self.alphas = 1.0 - self.betas
         self.alpha_bars = torch.cumprod(self.alphas, dim=0)
     
-    def cosine_beta_schedule(self, timesteps, s=0.008):
+    def cosine_beta_schedule(self, timesteps, beta_start=1e-4, beta_end=0.02, s=0.008):
         """
         Create a beta schedule that follows a cosine curve.
         """
@@ -407,7 +416,9 @@ class DiffusionProcess:
         alphas_cumprod = torch.cos(((x / timesteps) + s) / (1 + s) * torch.pi * 0.5) ** 2
         alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
         betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
-        return torch.clip(betas, 0.0001, 0.9999)
+        # Clip and rescale to desired range
+        betas = torch.clip(betas, beta_start, beta_end)
+        return betas
 
     def calculate_broadening_from_scherrer(self, t_fraction, two_theta_rad):
         """
@@ -511,7 +522,7 @@ class DiffusionProcess:
         - Peak broadening: apply broadening based on crystallite size simulation.
         """
         x_aug = x0.clone()
-        batch, _, L = x0.shape
+        batch, _, _ = x0.shape  # Don't need L variable
         
         # Progressive parameter scaling based on timestep
         # Higher t values mean more augmentation
@@ -588,24 +599,20 @@ class DiffusionProcess:
                 
                 # Predict noise
                 noise_pred = model(x, t_batch, temperature)
-                
+
                 # Compute x_{t-1}
-                alpha = self.alphas[t]
                 alpha_bar = self.alpha_bars[t]
                 alpha_bar_prev = self.alpha_bars[t-1] if t > 0 else torch.tensor(1.0, device=x.device)
                 
-                # One-step denoising
-                coef1 = torch.sqrt(alpha_bar_prev) / torch.sqrt(alpha_bar)
-                coef2 = torch.sqrt(1 - alpha_bar_prev - noise_scale**2) / torch.sqrt(1 - alpha_bar)
-                
+                # Simplified denoising step
                 pred_x0 = (x - torch.sqrt(1 - alpha_bar) * noise_pred) / torch.sqrt(alpha_bar)
-                
+
                 # Add noise if stochastic sampling
-                noise = torch.zeros_like(x)
                 if stochastic and i < len(timesteps) - 1:
                     noise = torch.randn_like(x) * noise_scale
-                
-                x = coef1 * pred_x0 + coef2 * noise_pred + noise
+                    x = torch.sqrt(alpha_bar_prev) * pred_x0 + torch.sqrt(1 - alpha_bar_prev) * noise
+                else:
+                    x = pred_x0
         
         model.train()
         return x
@@ -640,27 +647,12 @@ def train_model(model, diffusion, train_dataloader, val_dataloader,
     start_time = time.time()
     
     for epoch in range(num_epochs):
-        # Determine phase (gradually increase the difficulty)
-        phase = min(epoch // (num_epochs // 3) + 1, 3)
+        # Simplified training without phases for stability
+        diffusion_weight = 0.6
+        reconstruction_weight = 0.4
+        max_timestep = num_timesteps
         
-        # Adjust phase-specific parameters
-        if phase == 1:
-            # Phase 1: Focus more on standard diffusion denoising
-            diffusion_weight = 0.8
-            reconstruction_weight = 0.2
-            max_timestep = num_timesteps // 2
-        elif phase == 2:
-            # Phase 2: Balance both objectives
-            diffusion_weight = 0.5
-            reconstruction_weight = 0.5
-            max_timestep = int(num_timesteps * 0.75)
-        else:
-            # Phase 3: Focus more on real data reconstruction
-            diffusion_weight = 0.3
-            reconstruction_weight = 0.7
-            max_timestep = num_timesteps
-        
-        print(f"Epoch {epoch+1}/{num_epochs} (Phase {phase}): " +
+        print(f"Epoch {epoch+1}/{num_epochs}: " +
               f"Diffusion weight: {diffusion_weight}, Reconstruction weight: {reconstruction_weight}")
         
         # Training
@@ -681,10 +673,9 @@ def train_model(model, diffusion, train_dataloader, val_dataloader,
             noise_pred = model(x_t, t, temp)
             loss_diffusion = loss_fn(noise_pred, noise)
             
-            # 2. Real data reconstruction branch - temperature-guided approach
-            # Higher temperature = more noisy = needs higher timestep
-            noise_level = torch.clamp(temp * 0.5, 0.1, 0.4)  # Scale to reasonable noise level
-            t_real = (noise_level * max_timestep).long().squeeze(-1)
+            # 2. Real data reconstruction branch - simplified approach
+            # Use a fixed low noise level for reconstruction
+            t_real = torch.randint(0, max_timestep // 4, (batch_size,), device=device)  # Lower noise
             noise_pred_real = model(real, t_real, temp)
             alpha_bar_t = diffusion.alpha_bars[t_real].view(-1, 1, 1)
             denoised_real = (real - torch.sqrt(1 - alpha_bar_t) * noise_pred_real) / torch.sqrt(alpha_bar_t)
@@ -726,8 +717,7 @@ def train_model(model, diffusion, train_dataloader, val_dataloader,
                 loss_diffusion = loss_fn(noise_pred, noise)
                 
                 # 2. Real data reconstruction validation
-                noise_level = torch.clamp(temp * 0.5, 0.1, 0.4)
-                t_real = (noise_level * max_timestep).long().squeeze(-1)
+                t_real = torch.randint(0, max_timestep // 4, (batch_size,), device=device)
                 # Get noise prediction
                 noise_pred_real = model(real, t_real, temp)
 
@@ -816,8 +806,8 @@ def plot_overlay_sample(model, diffusion, synth_pattern, real_pattern, temp,
     
     # 1) Create noisy synthetic at timestep t_choice
     with torch.no_grad():
-        noisy_x, noise = diffusion.forward_diffusion(x0, t)
-        # 2) Denoise that noisy_x 
+        noisy_x, _ = diffusion.forward_diffusion(x0, t)  # Don't store unused noise
+        # 2) Denoise that noisy_x
         noise_pred = model(noisy_x, t, temp_in)                        # predict noise
         alpha_bar_t = diffusion.alpha_bars[t].view(1, 1, 1)            # [1,1,1]
         x0_pred = (noisy_x - torch.sqrt(1 - alpha_bar_t) * noise_pred) / torch.sqrt(alpha_bar_t)
@@ -867,16 +857,16 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}")
     
-    # Hyperparameters
-    num_timesteps = 1000
-    hidden_channels = 16  # Reduced from 64 to avoid memory issues
-    time_embedding_dim = 256
-    num_res_blocks = 2
-    attention_levels = [1,2]  # Reduced from [1,2] to simplify model
+    # Hyperparameters - Further optimized for memory efficiency
+    num_timesteps = 500  # Reduced from 1000
+    hidden_channels = 8   # Further reduced for memory
+    time_embedding_dim = 64  # Reduced from 256
+    num_res_blocks = 1    # Reduced from 2
+    attention_levels = [1]  # Only one attention level
     num_levels = 2
-    batch_size = 8  # Reduced from 32 to fit in memory
+    batch_size = 4        # Further reduced for memory
     num_epochs = 10
-    lr = 1e-4
+    lr = 2e-4            # Slightly higher LR for faster convergence
     weight_decay = 1e-5
     save_path = "./models/xrd_diffusion"
     os.makedirs(save_path, exist_ok=True)
@@ -884,39 +874,53 @@ def main():
 
     print("Loading dataset...")
 
-    dataset_dict = torch.load("data/xrd_dataset_labeled_dtw_window.pt", map_location=device)
+    # Check if dataset exists
+    dataset_path = "data/xrd_dataset_labeled_dtw_window.pt"
+    if not os.path.exists(dataset_path):
+        print(f"Error: Dataset file not found at {dataset_path}")
+        print("Please ensure the dataset is available or modify the path.")
+        return
 
-    synth_xrd = dataset_dict["synth_xrd"]
-    real_xrd = dataset_dict["real_xrd"]
-    global_temperature = dataset_dict["fast_dtw_distance"]
-    print(f"Loaded dataset with {len(synth_xrd)} samples")
-   
-    #sample_limit = 5000
-    #synth_xrd = synth_xrd[:sample_limit]
-    #real_xrd = real_xrd[:sample_limit]
-    #global_temperature = global_temperature[:sample_limit]
+    try:
+        dataset_dict = torch.load(dataset_path, map_location='cpu', weights_only=False)  # Load to CPU first
 
-    #print(f"Loaded dataset with {len(synth_xrd)} samples (limited to {sample_limit})")
+        synth_xrd = dataset_dict["synth_xrd"]
+        real_xrd = dataset_dict["real_xrd"]
+        global_temperature = dataset_dict["fast_dtw_distance"]
+        print(f"Loaded dataset with {len(synth_xrd)} samples")
+
+        # Further reduce sample limit for memory efficiency
+        sample_limit = 200
+        synth_xrd = synth_xrd[:sample_limit]
+        real_xrd = real_xrd[:sample_limit]
+        global_temperature = global_temperature[:sample_limit]
+
+        # Normalize temperature values to [0, 1] range for better conditioning
+        temp_min, temp_max = global_temperature.min(), global_temperature.max()
+        global_temperature = (global_temperature - temp_min) / (temp_max - temp_min + 1e-8)
+
+        print(f"Loaded dataset with {len(synth_xrd)} samples (limited to {sample_limit})")
+
+    except Exception as e:
+        print(f"Error loading dataset: {e}")
+        return
     
 
     dataset = XRDTransformDataset(synth_xrd, real_xrd, global_temperature)
     
     # Split dataset
     train_ratio = 0.7
-    val_ratio = 0.15
-    test_ratio = 0.15
-    
+
     train_size = int(train_ratio * len(dataset))
-    val_size = int(val_ratio * len(dataset))
-    test_size = len(dataset) - train_size - val_size
+    val_size = len(dataset) - train_size
     
-    train_dataset, val_dataset, test_dataset = random_split(
-        dataset, 
-        [train_size, val_size, test_size],
+    train_dataset, val_dataset = random_split(
+        dataset,
+        [train_size, val_size],
         generator=torch.Generator().manual_seed(42)
     )
-    
-    print(f"Dataset split: Train={len(train_dataset)}, Val={len(val_dataset)}, Test={len(test_dataset)}")
+
+    print(f"Dataset split: Train={len(train_dataset)}, Val={len(val_dataset)}")
     
     # Create dataloaders with correct pin_memory setting
     train_dataloader = DataLoader(
@@ -933,11 +937,8 @@ def main():
         num_workers=0
     )
 
-    test_dataloader = DataLoader(
-        test_dataset, 
-        batch_size=batch_size, 
-        shuffle=False
-    )
+    # Use validation data for testing
+    test_dataloader = val_dataloader
         
     # Initialize diffusion process
     print("Initializing diffusion process with cosine schedule...")
@@ -961,7 +962,7 @@ def main():
     
     # Train model
     print("\nStarting model training...")
-    history, trained_model = train_model(
+    train_model(
         model=model,
         diffusion=diffusion,
         train_dataloader=train_dataloader,
@@ -1053,7 +1054,7 @@ def main():
     # Create final visualizations
     print("\nCreating final visualizations...")
     visualize_progress(model, diffusion, test_dataloader, num_epochs, device, save_path, num_timesteps)
-    
+
     print("\nTraining and evaluation complete!")
 
 
@@ -1139,7 +1140,7 @@ def visualize_progress(model, diffusion, dataloader, epoch, device, save_path, n
         denoised_high = (noisy_high - torch.sqrt(1 - alpha_bar_high) * noise_pred_high) / torch.sqrt(alpha_bar_high)
             
     # Create visualization
-    fig, axs = plt.subplots(3, 1, figsize=(12, 28), constrained_layout=True) # Changed from 2,2 to 4,1
+    _, axs = plt.subplots(3, 1, figsize=(12, 20), constrained_layout=True)
     
     L_vis = synth_batch.shape[-1] # Get length from one of the patterns
     two_theta = np.linspace(0, 90, L_vis)
