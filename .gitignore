@@ -28,3 +28,4 @@ best_model.pth
 .ipynb_checkpoints
 diffusion/wandb
 2025-11-01-give-me-cli-command-what-program-was-last-changed.txt
+*.pth
