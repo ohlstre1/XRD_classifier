@@ -47,7 +47,7 @@ def main():
     print(f"Loaded dataset with {len(synth_xrd)} samples")
 
     # Optional: Limit dataset size for testing
-    sample_limit = 50
+    sample_limit = 250
     synth_xrd = synth_xrd[:sample_limit]
     real_xrd = real_xrd[:sample_limit]
     global_temperature = global_temperature[:sample_limit]
@@ -115,19 +115,15 @@ def main():
     model_parameters = sum(p.numel() for p in model.parameters())
     print(f"Model has {model_parameters:,} parameters")
 
-    # Train model
-    print("\nStarting model training...")
+    # Train model with enhanced features
+    print("\nStarting model training with enhanced checkpointing and W&B...")
     history, trained_model = train_model(
         model=model,
         diffusion=diffusion,
         train_dataloader=train_dataloader,
         val_dataloader=val_dataloader,
-        num_epochs=config.num_epochs,
-        lr=config.lr,
-        weight_decay=config.weight_decay,
         device=device,
-        save_path=config.save_path,
-        num_timesteps=config.num_timesteps
+        config=config  # Pass config object for enhanced features
     )
 
     # Evaluate on test set

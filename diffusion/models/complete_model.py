@@ -349,6 +349,13 @@ class DiffusionAugmentor(nn.Module):
         """
         Forward pass with explicit stochastic control for augmentation.
         """
+        # Normalize DTW temperature values if not already normalized
+        if temperature is not None and self.temperature_condition:
+            # Check if values are in [0,100] range and normalize if needed
+            if temperature.max() > 1.0:
+                temperature = temperature / 100.0
+                temperature = torch.clamp(temperature, 0.0, 1.0)
+
         # Time embedding
         t_emb = self.time_embed(t)
 
@@ -398,9 +405,9 @@ class DiffusionAugmentor(nn.Module):
         h = self.act_out(h)
         output = self.conv_out(h)
 
-        # Ensure XRD physical constraints (non-negative intensities)
-        # Use softplus for smoother constraint enforcement to prevent gradient issues
-        output = F.softplus(output, beta=2.0)  # More aggressive than clamp, smoother gradients
+        # Ensure XRD physical constraints with proper [0,1] range
+        # Use sigmoid to enable true zeros and prevent range violations
+        output = torch.sigmoid(output)  # Ensures [0,1] range with true zeros possible
 
         return output
 
@@ -425,6 +432,11 @@ class DiffusionAugmentor(nn.Module):
 
         device = synth_patterns.device
         batch_size = synth_patterns.shape[0]
+
+        # Normalize DTW values to [0,1] range if needed
+        if dtw_values.max() > 1.0:
+            dtw_values = dtw_values / 100.0
+            dtw_values = torch.clamp(dtw_values, 0.0, 1.0)
 
         # Expand patterns and conditioning for multiple variations
         expanded_patterns = synth_patterns.repeat(num_variations, 1, 1)
@@ -455,12 +467,17 @@ class DiffusionAugmentor(nn.Module):
         Add noise to DTW conditioning values for augmentation.
 
         Args:
-            dtw_values: Original DTW values [batch, 1]
+            dtw_values: Original DTW values [batch, 1] (can be [0,100] or [0,1] range)
             noise_scale: Scale of noise to add
 
         Returns:
             Noisy DTW values clamped to valid range [0, 1]
         """
+        # Normalize DTW values to [0,1] range if needed
+        if dtw_values.max() > 1.0:
+            dtw_values = dtw_values / 100.0
+            dtw_values = torch.clamp(dtw_values, 0.0, 1.0)
+
         noise = torch.randn_like(dtw_values) * noise_scale
         noisy_dtw = dtw_values + noise
         return torch.clamp(noisy_dtw, 0.0, 1.0)

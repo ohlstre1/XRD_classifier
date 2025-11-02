@@ -20,7 +20,7 @@ class TrainingConfig:
 
     # Training parameters
     batch_size: int = 8
-    num_epochs: int = 100
+    num_epochs: int = 200
     lr: float = 1e-4
     weight_decay: float = 1e-5
 
@@ -31,6 +31,17 @@ class TrainingConfig:
 
     # Paths
     save_path: str = "./models/xrd_diffusion"
+
+    # Checkpointing
+    save_every_n_epochs: int = 10
+    keep_top_k_models: int = 3
+    auto_resume: bool = True
+
+    # Weights & Biases
+    use_wandb: bool = True
+    wandb_project: str = "xrd-diffusion"
+    wandb_entity: str = None  # Use default entity
+    wandb_run_name: str = None  # Auto-generate if None
 
     def __post_init__(self):
         if self.attention_levels is None:

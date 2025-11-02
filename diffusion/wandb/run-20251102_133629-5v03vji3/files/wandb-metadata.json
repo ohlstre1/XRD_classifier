@@ -1,0 +1,41 @@
+{
+  "os": "Linux-5.15.167.4-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "python": "CPython 3.12.3",
+  "startedAt": "2025-11-02T11:36:29.102772Z",
+  "program": "/home/bert_25/XRD_calssifier/diffusion/main.py",
+  "codePath": "diffusion/main.py",
+  "git": {
+    "remote": "git@github.com:ohlstre1/XRD_calssifier.git",
+    "commit": "a8c361622f66d0dd6e646b562e7e99bb676b3662"
+  },
+  "email": "edvard.ohlstrom@hotmail.com",
+  "root": "/home/bert_25/XRD_calssifier/diffusion",
+  "host": "BertThePC",
+  "executable": "/home/bert_25/XRD_calssifier/myenv/bin/python",
+  "codePathLocal": "main.py",
+  "cpu_count": 4,
+  "cpu_count_logical": 4,
+  "gpu": "NVIDIA GeForce GTX 1060 6GB",
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "1081101176832",
+      "used": "63855603712"
+    }
+  },
+  "memory": {
+    "total": "25206571008"
+  },
+  "cpu": {
+    "count": 4,
+    "countLogical": 4
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA GeForce GTX 1060 6GB",
+      "memoryTotal": "6442450944",
+      "architecture": "Pascal"
+    }
+  ],
+  "cudaVersion": "13.0"
+}
