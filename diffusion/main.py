@@ -11,11 +11,12 @@ from torch.utils.data import DataLoader, random_split
 import os
 
 # Import refactored modules
-from datasets import XRDTransformDataset
-from models import ImprovedDiffusionDenoiser
-from diffusion import DiffusionProcess
-from training import train_model, TrainingConfig
-from visualization import plot_training_history, visualize_progress
+from datasets.xrd_dataset import XRDTransformDataset
+from models.complete_model import ImprovedDiffusionDenoiser
+from diffusion.process import DiffusionProcess
+from training.trainer import train_model
+from training.config import TrainingConfig
+from visualization.plotting import plot_training_history, plot_overlay_sample
 
 
 def main():
@@ -38,7 +39,7 @@ def main():
     os.makedirs(config.save_path, exist_ok=True)
 
     print("Loading dataset...")
-    dataset_dict = torch.load("data/xrd_dataset_labeled_dtw_window.pt", map_location=device)
+    dataset_dict = torch.load("../data/xrd_dataset_labeled_dtw_window.pt", map_location=device)
 
     synth_xrd = dataset_dict["synth_xrd"]
     real_xrd = dataset_dict["real_xrd"]
@@ -46,11 +47,11 @@ def main():
     print(f"Loaded dataset with {len(synth_xrd)} samples")
 
     # Optional: Limit dataset size for testing
-    # sample_limit = 5000
-    # synth_xrd = synth_xrd[:sample_limit]
-    # real_xrd = real_xrd[:sample_limit]
-    # global_temperature = global_temperature[:sample_limit]
-    # print(f"Limited dataset to {sample_limit} samples")
+    sample_limit = 50
+    synth_xrd = synth_xrd[:sample_limit]
+    real_xrd = real_xrd[:sample_limit]
+    global_temperature = global_temperature[:sample_limit]
+    print(f"Limited dataset to {sample_limit} samples")
 
     # Create dataset
     dataset = XRDTransformDataset(synth_xrd, real_xrd, global_temperature)
@@ -181,7 +182,16 @@ def main():
     # Create final visualizations
     print("\nCreating final visualizations...")
     plot_training_history(history, config.save_path)
-    visualize_progress(model, diffusion, test_dataloader, config.num_epochs, device, config.save_path, config.num_timesteps)
+
+    # Create sample overlay plot with test data
+    if len(test_dataloader) > 0:
+        with torch.no_grad():
+            for synth, real, temp in test_dataloader:
+                synth, real, temp = synth.to(device), real.to(device), temp.to(device)
+                plot_overlay_sample(model, diffusion, synth[0:1], real[0:1], temp[0:1],
+                                  t_choice=100, save_path=f"{config.save_path}/final_sample.png",
+                                  title_suffix=f"Epoch {config.num_epochs}")
+                break  # Just plot one sample
 
     print("\nTraining and evaluation complete!")
 

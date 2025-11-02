@@ -13,7 +13,14 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 
 # Import visualization functions
-from ..visualization import plot_training_history, visualize_progress
+try:
+    from visualization.plotting import plot_training_history, plot_overlay_sample
+except ImportError:
+    # Fallback for when running from diffusion directory
+    import sys
+    import os
+    sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+    from visualization.plotting import plot_training_history, plot_overlay_sample
 
 
 def train_model(model, diffusion, train_dataloader, val_dataloader,
@@ -84,14 +91,11 @@ def train_model(model, diffusion, train_dataloader, val_dataloader,
             noise_pred = model(x_t, t, temp)
             loss_diffusion = loss_fn(noise_pred, noise)
 
-            # 2. Real data reconstruction branch - temperature-guided approach
-            # Higher temperature = more noisy = needs higher timestep
-            noise_level = torch.clamp(temp * 0.5, 0.1, 0.4)  # Scale to reasonable noise level
-            t_real = (noise_level * max_timestep).long().squeeze(-1)
-            noise_pred_real = model(real, t_real, temp)
-            alpha_bar_t = diffusion.alpha_bars[t_real].view(-1, 1, 1)
-            denoised_real = (real - torch.sqrt(1 - alpha_bar_t) * noise_pred_real) / torch.sqrt(alpha_bar_t)
-            loss_reconstruction = loss_fn(denoised_real, synth)
+            # 2. Direct transformation branch - synth→real with DTW conditioning
+            # Use t=0 for clean transformation (no denoising, just conversion)
+            t_zero = torch.zeros(batch_size, dtype=torch.long, device=device)
+            synth_to_real = model(synth, t_zero, temp)  # Transform synth to real using DTW
+            loss_reconstruction = loss_fn(synth_to_real, real)
 
             # Combined weighted loss
             loss = (diffusion_weight * loss_diffusion) + (reconstruction_weight * loss_reconstruction)
@@ -128,18 +132,10 @@ def train_model(model, diffusion, train_dataloader, val_dataloader,
                 noise_pred = model(x_t, t, temp)
                 loss_diffusion = loss_fn(noise_pred, noise)
 
-                # 2. Real data reconstruction validation
-                noise_level = torch.clamp(temp * 0.5, 0.1, 0.4)
-                t_real = (noise_level * max_timestep).long().squeeze(-1)
-                # Get noise prediction
-                noise_pred_real = model(real, t_real, temp)
-
-                # Calculate the denoised signal from the noise prediction
-                alpha_bar_t = diffusion.alpha_bars[t_real].view(-1, 1, 1)
-                denoised_real = (real - torch.sqrt(1 - alpha_bar_t) * noise_pred_real) / torch.sqrt(alpha_bar_t)
-
-                # Compare the denoised real with synthetic target
-                loss_reconstruction = loss_fn(denoised_real, synth)
+                # 2. Direct transformation validation - synth→real with DTW conditioning
+                t_zero = torch.zeros(batch_size, dtype=torch.long, device=device)
+                synth_to_real = model(synth, t_zero, temp)  # Transform synth to real using DTW
+                loss_reconstruction = loss_fn(synth_to_real, real)
 
                 # Combined weighted loss
                 loss = (diffusion_weight * loss_diffusion) + (reconstruction_weight * loss_reconstruction)

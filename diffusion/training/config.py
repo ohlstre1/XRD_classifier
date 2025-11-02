@@ -2,7 +2,7 @@
 Training configuration for XRD diffusion model.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List
 
 
@@ -15,12 +15,12 @@ class TrainingConfig:
     hidden_channels: int = 16
     time_embedding_dim: int = 256
     num_res_blocks: int = 2
-    attention_levels: List[int] = None
+    attention_levels: List[int] = field(default_factory=lambda: [1, 2])
     num_levels: int = 2
 
     # Training parameters
     batch_size: int = 8
-    num_epochs: int = 10
+    num_epochs: int = 100
     lr: float = 1e-4
     weight_decay: float = 1e-5
 
