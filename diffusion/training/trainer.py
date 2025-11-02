@@ -217,8 +217,8 @@ def train_model(model, diffusion, train_dataloader, val_dataloader,
             reconstruction_weight = 0.5
             max_timestep = int(num_timesteps * 0.75)
         else:
-            diffusion_weight = 0.2
-            reconstruction_weight = 0.8
+            diffusion_weight = 0.1
+            reconstruction_weight = 0.9
             max_timestep = num_timesteps
 
         print(f"Epoch {epoch+1}/{num_epochs} (Phase {phase}): " +
@@ -275,9 +275,8 @@ def train_model(model, diffusion, train_dataloader, val_dataloader,
                     'batch_diff_loss': loss_diffusion.item(),
                     'batch_recon_loss': loss_reconstruction.item(),
                     'learning_rate': optimizer.param_groups[0]['lr'],
-                    'epoch': epoch,
                     'phase': phase
-                })
+                }, step=epoch * len(train_dataloader) + batch_idx)
 
         avg_train_loss = train_loss / len(train_dataloader)
         avg_diff_loss = diff_loss_sum / len(train_dataloader)
@@ -328,10 +327,9 @@ def train_model(model, diffusion, train_dataloader, val_dataloader,
               f"Train Loss: {avg_train_loss:.6f} (Diff: {avg_diff_loss:.6f}, Recon: {avg_recon_loss:.6f}), " +
               f"Val Loss: {avg_val_loss:.6f}, LR: {current_lr:.6f}")
 
-        # Log to W&B
+        # Log to W&B (epoch-level metrics)
         if wandb_run:
             wandb.log({
-                'epoch': epoch,
                 'train_loss': avg_train_loss,
                 'val_loss': avg_val_loss,
                 'diff_loss': avg_diff_loss,
@@ -340,7 +338,7 @@ def train_model(model, diffusion, train_dataloader, val_dataloader,
                 'phase': phase,
                 'diffusion_weight': diffusion_weight,
                 'reconstruction_weight': reconstruction_weight
-            })
+            }, step=epoch)
 
         # Save best model
         is_best = avg_val_loss < best_val_loss

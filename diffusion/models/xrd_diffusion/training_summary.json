@@ -1,0 +1,7 @@
+{
+  "total_epochs": 200,
+  "best_val_loss": 0.11807861179113388,
+  "total_training_time": 1504.7946140766144,
+  "final_lr": 1.0005551538325275e-05,
+  "model_parameters": 237105
+}

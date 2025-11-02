@@ -21,3 +21,10 @@ config: {'hidden_channels': 16, 'time_embedding_dim': 256, 'num_res_blocks': 2, 
 2025-11-02 13:36:29,915 INFO    MainThread:135285 [wandb_run.py:_redirect():2315] Redirects installed.
 2025-11-02 13:36:29,917 INFO    MainThread:135285 [wandb_init.py:init():1032] run started, returning control to user process
 2025-11-02 13:36:29,917 INFO    MainThread:135285 [wandb_watch.py:_watch():71] Watching
+2025-11-02 14:01:35,630 INFO    MainThread:135285 [wandb_run.py:_finish():2112] finishing run edvard_ohlstrom-aalto-university/xrd-diffusion/5v03vji3
+2025-11-02 14:01:35,630 INFO    MainThread:135285 [wandb_run.py:_atexit_cleanup():2340] got exitcode: 0
+2025-11-02 14:01:35,630 INFO    MainThread:135285 [wandb_run.py:_restore():2322] restore
+2025-11-02 14:01:35,630 INFO    MainThread:135285 [wandb_run.py:_restore():2328] restore done
+2025-11-02 14:01:37,670 INFO    MainThread:135285 [wandb_run.py:_footer_history_summary_info():3956] rendering history
+2025-11-02 14:01:37,671 INFO    MainThread:135285 [wandb_run.py:_footer_history_summary_info():3988] rendering summary
+2025-11-02 14:01:37,671 INFO    MainThread:135285 [wandb_run.py:_footer_sync_info():3917] logging synced files

@@ -20,9 +20,9 @@ class TrainingConfig:
 
     # Training parameters
     batch_size: int = 8
-    num_epochs: int = 200
+    num_epochs: int = 100
     lr: float = 1e-4
-    weight_decay: float = 1e-5
+    weight_decay: float = 5e-6
 
     # Data parameters
     train_ratio: float = 0.7
