@@ -47,7 +47,8 @@ class ModelCheckpoint:
 
     def save_checkpoint(self, model, optimizer, scheduler, epoch: int, val_loss: float,
                        train_loss: float, history: Dict, is_best: bool = False,
-                       is_regular: bool = False) -> str:
+                       is_regular: bool = False, wandb_run_id: str = None,
+                       global_step: int = None) -> str:
         """Save model checkpoint with comprehensive state."""
 
         # Determine filename
@@ -70,6 +71,8 @@ class ModelCheckpoint:
             'train_loss': train_loss,
             'history': history,
             'timestamp': datetime.now().isoformat(),
+            'wandb_run_id': wandb_run_id,
+            'global_step': global_step,
             'model_config': {
                 'model_class': model.__class__.__name__,
                 'model_params': sum(p.numel() for p in model.parameters())
@@ -175,6 +178,7 @@ def train_model(model, diffusion, train_dataloader, val_dataloader,
     # Training state
     start_epoch = 0
     best_val_loss = float('inf')
+    global_step = 0  # Track total training steps across all epochs
     history = {
         'train_loss': [],
         'val_loss': [],
@@ -194,7 +198,8 @@ def train_model(model, diffusion, train_dataloader, val_dataloader,
             best_val_loss = checkpoint_data.get('val_loss', float('inf'))
             history = checkpoint_data.get('history', history)
             wandb_run_id = checkpoint_data.get('wandb_run_id', None)
-            print(f"Resumed from epoch {start_epoch}, best val loss: {best_val_loss:.6f}")
+            global_step = checkpoint_data.get('global_step', 0)  # Restore global step counter
+            print(f"Resumed from epoch {start_epoch}, best val loss: {best_val_loss:.6f}, global step: {global_step}")
 
     # Initialize W&B
     wandb_run = init_wandb(config, model, wandb_run_id)
@@ -268,15 +273,18 @@ def train_model(model, diffusion, train_dataloader, val_dataloader,
                 'Recon': f"{loss_reconstruction.item():.4f}"
             })
 
+            # Increment global step counter
+            global_step += 1
+
             # Log to W&B (every 100 steps)
-            if wandb_run and batch_idx % 100 == 0:
+            if wandb_run and global_step % 100 == 0:
                 wandb.log({
                     'batch_loss': loss.item(),
                     'batch_diff_loss': loss_diffusion.item(),
                     'batch_recon_loss': loss_reconstruction.item(),
                     'learning_rate': optimizer.param_groups[0]['lr'],
                     'phase': phase
-                }, step=epoch * len(train_dataloader) + batch_idx)
+                }, step=global_step)
 
         avg_train_loss = train_loss / len(train_dataloader)
         avg_diff_loss = diff_loss_sum / len(train_dataloader)
@@ -330,6 +338,7 @@ def train_model(model, diffusion, train_dataloader, val_dataloader,
         # Log to W&B (epoch-level metrics)
         if wandb_run:
             wandb.log({
+                'epoch': epoch,
                 'train_loss': avg_train_loss,
                 'val_loss': avg_val_loss,
                 'diff_loss': avg_diff_loss,
@@ -338,15 +347,15 @@ def train_model(model, diffusion, train_dataloader, val_dataloader,
                 'phase': phase,
                 'diffusion_weight': diffusion_weight,
                 'reconstruction_weight': reconstruction_weight
-            }, step=epoch)
+            }, step=global_step)
 
         # Save best model
         is_best = avg_val_loss < best_val_loss
         if is_best:
             best_val_loss = avg_val_loss
-            best_path = checkpoint_manager.save_checkpoint(
+            checkpoint_manager.save_checkpoint(
                 model, optimizer, scheduler, epoch, avg_val_loss, avg_train_loss,
-                history, is_best=True
+                history, is_best=True, wandb_run_id=wandb_run_id, global_step=global_step
             )
             print(f"✓ Saved best model with validation loss: {best_val_loss:.6f}")
 
@@ -354,14 +363,15 @@ def train_model(model, diffusion, train_dataloader, val_dataloader,
         if (epoch + 1) % checkpoint_manager.save_every_n_epochs == 0:
             checkpoint_path = checkpoint_manager.save_checkpoint(
                 model, optimizer, scheduler, epoch, avg_val_loss, avg_train_loss, history,
-                is_regular=True
+                is_regular=True, wandb_run_id=wandb_run_id, global_step=global_step
             )
             print(f"✓ Saved regular checkpoint: {os.path.basename(checkpoint_path)}")
 
         # Save top-k model
         if not is_best:  # Don't duplicate if already saved as best
             checkpoint_manager.save_checkpoint(
-                model, optimizer, scheduler, epoch, avg_val_loss, avg_train_loss, history
+                model, optimizer, scheduler, epoch, avg_val_loss, avg_train_loss, history,
+                wandb_run_id=wandb_run_id, global_step=global_step
             )
 
     total_time = time.time() - start_time
@@ -372,12 +382,15 @@ def train_model(model, diffusion, train_dataloader, val_dataloader,
     # Final visualization
     plot_training_history(history, save_path)
 
+    # Get final learning rate (handle case where no training occurred)
+    final_lr = scheduler.get_last_lr()[0] if hasattr(scheduler, 'get_last_lr') else lr
+
     # Save final training summary
     summary = {
         'total_epochs': num_epochs,
         'best_val_loss': best_val_loss,
         'total_training_time': total_time,
-        'final_lr': current_lr,
+        'final_lr': final_lr,
         'model_parameters': sum(p.numel() for p in model.parameters()),
     }
 
