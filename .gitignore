@@ -9,3 +9,22 @@ models/xrd_diffusion
 /myenv/
 /wandb/
 xrd_classifier_model.pth
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyTorch models and checkpoints
+*.pth
+*.pt
+checkpoint_epoch_*.pth
+model_epoch_*.pth
+best_model.pth
+
+# Environment files
+.env
+
+# Jupyter Notebook
+.ipynb_checkpoints
+diffusion/wandb
+2025-11-01-give-me-cli-command-what-program-was-last-changed.txt
