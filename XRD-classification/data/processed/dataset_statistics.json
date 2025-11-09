@@ -1,0 +1,18 @@
+{
+  "total_compounds": 13325,
+  "dtw_distance_stats": {
+    "mean": 9.331990004279152,
+    "std": 9.033446320487977,
+    "min": 0.3577224612236023,
+    "max": 100.0,
+    "median": 6.152918338775635
+  },
+  "synth_pattern_stats": {
+    "mean_intensity": 0.0017683646159825802,
+    "std_intensity": 0.0011676821755482833
+  },
+  "real_pattern_stats": {
+    "mean_intensity": 0.0015674932861082975,
+    "std_intensity": 0.0010440452074141817
+  }
+}

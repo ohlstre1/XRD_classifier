@@ -1,0 +1,150 @@
+{
+  "configuration": {
+    "n_samples": 500,
+    "epochs": 10,
+    "batch_size": 16,
+    "learning_rate": 0.0001,
+    "embedding_dim": 128
+  },
+  "data_split": {
+    "train_compounds": 400,
+    "val_compounds": 100,
+    "train_samples": 1200,
+    "val_samples": 100
+  },
+  "training": {
+    "best_val_classification_accuracy": 0.87,
+    "best_epoch": 1,
+    "training_time_seconds": 89.77532291412354,
+    "final_train_loss": 13.685090713500976,
+    "final_val_loss": 2.7422049726758684,
+    "final_val_classification_accuracy": 0.85
+  },
+  "evaluation": {
+    "top1_accuracy": 0.85,
+    "top5_accuracy": 0.94,
+    "total_samples": 100,
+    "correct_top1": 85,
+    "correct_top5": 94
+  },
+  "model_info": {
+    "model_type": "XRDPrototypicalClassifier",
+    "backbone": "ResNet1D-18",
+    "embedding_dim": 128,
+    "loss_type": "prototypical_triplet",
+    "temperature": 0.1,
+    "total_parameters": 3909824,
+    "trainable_parameters": 3909824,
+    "training_step": 750,
+    "proto_weight": 1.0,
+    "triplet_weight": 0.5,
+    "triplet_margin": 0.2
+  },
+  "training_history": [
+    {
+      "epoch": 1,
+      "train_loss": 13.895795389811198,
+      "val_loss": 2.6337003026689803,
+      "train_batch_accuracy": 0.0,
+      "val_batch_accuracy": 0.0,
+      "train_classification_accuracy": null,
+      "val_classification_accuracy": 0.87,
+      "learning_rate": 9.779754323328192e-05
+    },
+    {
+      "epoch": 2,
+      "train_loss": 13.753225237528483,
+      "val_loss": 2.7057686873844693,
+      "train_batch_accuracy": 0.0,
+      "val_batch_accuracy": 0.0,
+      "train_classification_accuracy": null,
+      "val_classification_accuracy": 0.86,
+      "learning_rate": 9.140576474687264e-05
+    },
+    {
+      "epoch": 3,
+      "train_loss": 13.749245948791504,
+      "val_loss": 2.7344424554279874,
+      "train_batch_accuracy": 0.0,
+      "val_batch_accuracy": 0.0,
+      "train_classification_accuracy": null,
+      "val_classification_accuracy": 0.87,
+      "learning_rate": 8.14503363531613e-05
+    },
+    {
+      "epoch": 4,
+      "train_loss": 13.737874043782552,
+      "val_loss": 2.78143801007952,
+      "train_batch_accuracy": 0.0,
+      "val_batch_accuracy": 0.0,
+      "train_classification_accuracy": null,
+      "val_classification_accuracy": 0.86,
+      "learning_rate": 6.890576474687264e-05
+    },
+    {
+      "epoch": 5,
+      "train_loss": 13.722553977966308,
+      "val_loss": 2.7825795922960554,
+      "train_batch_accuracy": 0.0,
+      "val_batch_accuracy": 0.0,
+      "train_classification_accuracy": 0.0025,
+      "val_classification_accuracy": 0.84,
+      "learning_rate": 5.500000000000001e-05
+    },
+    {
+      "epoch": 6,
+      "train_loss": 13.676477661132813,
+      "val_loss": 2.759580203465053,
+      "train_batch_accuracy": 0.0,
+      "val_batch_accuracy": 0.0,
+      "train_classification_accuracy": null,
+      "val_classification_accuracy": 0.85,
+      "learning_rate": 4.109423525312737e-05
+    },
+    {
+      "epoch": 7,
+      "train_loss": 13.71117972056071,
+      "val_loss": 2.7579383850097656,
+      "train_batch_accuracy": 0.0,
+      "val_batch_accuracy": 0.0,
+      "train_classification_accuracy": null,
+      "val_classification_accuracy": 0.85,
+      "learning_rate": 2.8549663646838717e-05
+    },
+    {
+      "epoch": 8,
+      "train_loss": 13.699314384460449,
+      "val_loss": 2.7594766446522305,
+      "train_batch_accuracy": 0.0,
+      "val_batch_accuracy": 0.0,
+      "train_classification_accuracy": null,
+      "val_classification_accuracy": 0.86,
+      "learning_rate": 1.8594235253127375e-05
+    },
+    {
+      "epoch": 9,
+      "train_loss": 13.680710563659668,
+      "val_loss": 2.752138989312308,
+      "train_batch_accuracy": 0.0,
+      "val_batch_accuracy": 0.0,
+      "train_classification_accuracy": null,
+      "val_classification_accuracy": 0.85,
+      "learning_rate": 1.2202456766718093e-05
+    },
+    {
+      "epoch": 10,
+      "train_loss": 13.685090713500976,
+      "val_loss": 2.7422049726758684,
+      "train_batch_accuracy": 0.0,
+      "val_batch_accuracy": 0.0,
+      "train_classification_accuracy": 0.0025,
+      "val_classification_accuracy": 0.85,
+      "learning_rate": 1e-05
+    }
+  ],
+  "accuracy_explanation": {
+    "batch_accuracy": "Prototypical accuracy within batch (measures prototype assignment)",
+    "classification_accuracy": "Real classification accuracy (cosine similarity to prototypes)",
+    "evaluation_top1_accuracy": "Final evaluation accuracy using real vs synthetic patterns"
+  }
+}
