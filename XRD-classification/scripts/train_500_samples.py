@@ -32,6 +32,15 @@ try:
     TENSORBOARD_AVAILABLE = True
 except ImportError:
     TENSORBOARD_AVAILABLE = False
+
+# Wandb import
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+    print("Warning: wandb not available, install with 'pip install wandb'")
+
 import json
 import yaml
 import os
@@ -42,6 +51,8 @@ from tqdm import tqdm
 import time
 from datetime import datetime
 import warnings
+from typing import List
+from torch.utils.data import Dataset
 
 # Add parent directories to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -49,10 +60,61 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')
 
 # Import our modules
 from models import XRDPrototypicalClassifier
-from utils.data_loader import create_data_loaders, create_test_loader
 from utils.augmentation import DualXRDAugmenter
 
 warnings.filterwarnings('ignore')
+
+
+class XRDDuplicatedDataset(Dataset):
+    """
+    Custom dataset that handles pattern duplication correctly for prototypical learning.
+
+    Duplicated patterns belong to the same compound but provide more training diversity.
+    """
+
+    def __init__(self, compound_ids: List[str], compound_mapping: dict, data: dict,
+                 augmenter, samples_per_pattern: int = 5):
+        self.compound_ids = compound_ids
+        self.compound_mapping = compound_mapping
+        self.data = data
+        self.augmenter = augmenter
+        self.samples_per_pattern = samples_per_pattern
+
+        # Create label mapping
+        unique_ids = sorted(set(compound_ids))
+        self.id_to_label = {cid: idx for idx, cid in enumerate(unique_ids)}
+
+        print(f"XRDDuplicatedDataset: {len(compound_ids)} compounds, {samples_per_pattern} augmentations each")
+
+    def __len__(self):
+        return len(self.compound_ids) * self.samples_per_pattern
+
+    def __getitem__(self, idx):
+        """Get augmented pattern from potentially duplicated base patterns."""
+        # Which compound does this sample belong to?
+        compound_idx = idx // self.samples_per_pattern
+        compound_id = self.compound_ids[compound_idx]
+
+        # Get pattern indices for this compound (includes duplicates)
+        pattern_indices = self.compound_mapping[compound_id].get('pattern_indices', [compound_idx])
+
+        # Randomly select from available patterns for this compound
+        selected_pattern_idx = np.random.choice(pattern_indices)
+
+        # Get the base synthetic pattern
+        base_pattern = self.data['synth_xrd'][selected_pattern_idx]
+
+        # Apply augmentation
+        if self.augmenter is not None:
+            augmented_pattern, _ = self.augmenter.augment_pattern_mixed(base_pattern, num_samples=1)
+            pattern_tensor = augmented_pattern[0]  # Take first (and only) augmented sample
+        else:
+            pattern_tensor = base_pattern.unsqueeze(0)  # Add channel dimension
+
+        # Get label
+        label = self.id_to_label[compound_id]
+
+        return pattern_tensor, label, compound_id
 
 
 def load_subset_data(dataset_path: str, n_samples: int = 500) -> dict:
@@ -92,6 +154,88 @@ def normalize_patterns(patterns: torch.Tensor) -> torch.Tensor:
     return (patterns - patterns_min) / patterns_range
 
 
+def duplicate_patterns(data: dict, config: dict) -> dict:
+    """
+    Duplicate synthetic patterns to increase base diversity before augmentation.
+
+    IMPORTANT: Duplicates are treated as the SAME compound for prototypical learning.
+
+    Args:
+        data: Dataset dictionary containing synth_xrd and real_xrd
+        config: Configuration dictionary with pattern_processing settings
+
+    Returns:
+        Modified dataset with duplicated synthetic patterns + compound_groups mapping
+    """
+    dup_config = config.get('pattern_processing', {}).get('pattern_duplication', {})
+
+    if not dup_config.get('enabled', False):
+        print("Pattern duplication disabled, using original patterns")
+        # Add trivial compound groups (each pattern is its own group)
+        data['compound_groups'] = {i: [i] for i in range(len(data['synth_xrd']))}
+        return data
+
+    duplication_factor = dup_config.get('duplication_factor', 2)
+    noise_level = dup_config.get('duplication_noise', 0.005)
+
+    print(f"Duplicating synthetic patterns: factor={duplication_factor}, noise={noise_level}")
+
+    original_synth = data['synth_xrd']
+    original_real = data['real_xrd']
+    original_info = data['file_info']
+    original_dtw = data['fast_dtw_distance']
+
+    n_original = len(original_synth)
+
+    # Create duplicates with small noise variations
+    all_synth = [original_synth]  # Start with originals
+    all_real = [original_real]
+    all_info = [original_info]
+    all_dtw = [original_dtw]
+
+    # Track which indices belong to the same compound
+    compound_groups = {}
+    current_idx = 0
+
+    # Initialize groups with original patterns
+    for orig_idx in range(n_original):
+        compound_groups[orig_idx] = [current_idx]
+        current_idx += 1
+
+    for dup_idx in range(duplication_factor):
+        # Add small Gaussian noise to create variations
+        noise = torch.randn_like(original_synth) * noise_level
+        synth_variant = original_synth + noise
+
+        # Duplicate corresponding real patterns and metadata
+        all_synth.append(synth_variant)
+        all_real.append(original_real.clone())
+        all_info.append([f"{info}_dup{dup_idx+1}" for info in original_info])
+        all_dtw.append(original_dtw.clone())
+
+        # Add duplicate indices to their original compound groups
+        for orig_idx in range(n_original):
+            compound_groups[orig_idx].append(current_idx)
+            current_idx += 1
+
+    # Concatenate all patterns
+    data_duplicated = {
+        'synth_xrd': torch.cat(all_synth, dim=0),
+        'real_xrd': torch.cat(all_real, dim=0),
+        'file_info': [item for sublist in all_info for item in sublist],
+        'fast_dtw_distance': torch.cat(all_dtw, dim=0),
+        'compound_groups': compound_groups  # Track which patterns belong to same compound
+    }
+
+    n_final = len(data_duplicated['synth_xrd'])
+    print(f"✅ Pattern duplication completed: {n_original} → {n_final} samples")
+    print(f"   Multiplier: {n_final/n_original:.1f}x")
+    print(f"   Compound groups: {len(compound_groups)} unique compounds")
+    print(f"   Patterns per compound: {len(compound_groups[0])}")
+
+    return data_duplicated
+
+
 def create_subset_mapping(data: dict) -> dict:
     """Create compound mapping for subset data."""
     print("Creating compound mapping for subset...")
@@ -100,17 +244,40 @@ def create_subset_mapping(data: dict) -> dict:
     real_normalized = normalize_patterns(data['real_xrd'])
 
     compound_mapping = {}
-    n_compounds = len(synth_normalized)
+    n_patterns = len(synth_normalized)
 
-    for i in range(n_compounds):
-        compound_id = f"compound_{i:05d}"
-        compound_mapping[compound_id] = {
-            'index': i,
-            'synth_pattern': synth_normalized[i].numpy().tolist(),
-            'real_pattern': real_normalized[i].numpy().tolist(),
-            'file_info': str(data['file_info'][i]),
-            'dtw_distance': float(data['fast_dtw_distance'][i])
-        }
+    # Get compound groups if they exist
+    compound_groups = data.get('compound_groups', {})
+
+    if compound_groups:
+        # Use only original compounds (first pattern in each group)
+        print(f"Using compound groups: {len(compound_groups)} unique compounds")
+        for compound_idx in range(len(compound_groups)):
+            compound_id = f"compound_{compound_idx:05d}"
+            pattern_indices = compound_groups[compound_idx]
+
+            # Use first pattern as representative
+            main_idx = pattern_indices[0]
+
+            compound_mapping[compound_id] = {
+                'index': compound_idx,
+                'synth_pattern': synth_normalized[main_idx].numpy().tolist(),
+                'real_pattern': real_normalized[main_idx].numpy().tolist(),
+                'file_info': str(data['file_info'][main_idx]),
+                'dtw_distance': float(data['fast_dtw_distance'][main_idx]),
+                'pattern_indices': pattern_indices  # Track all patterns for this compound
+            }
+    else:
+        # Fallback: each pattern is its own compound
+        for i in range(n_patterns):
+            compound_id = f"compound_{i:05d}"
+            compound_mapping[compound_id] = {
+                'index': i,
+                'synth_pattern': synth_normalized[i].numpy().tolist(),
+                'real_pattern': real_normalized[i].numpy().tolist(),
+                'file_info': str(data['file_info'][i]),
+                'dtw_distance': float(data['fast_dtw_distance'][i])
+            }
 
     print(f"✅ Created mapping for {len(compound_mapping)} compounds")
     return compound_mapping
@@ -290,12 +457,13 @@ def train_epoch(model, train_loader, optimizer, device, epoch, train_ids=None, c
         total_loss += loss.item()
         total_proto_loss += metrics.get('proto_loss_component', loss).item()
         total_triplet_loss += metrics.get('triplet_loss_component', torch.tensor(0.0)).item()
-        total_batch_accuracy += metrics.get('proto_accuracy', 0.0).item()
+        proto_accuracy = metrics.get('proto_accuracy', 0.0)
+        total_batch_accuracy += proto_accuracy.item() if hasattr(proto_accuracy, 'item') else proto_accuracy
 
         # Update progress bar
         pbar.set_postfix({
             'loss': f'{loss.item():.4f}',
-            'batch_acc': f'{metrics.get("proto_accuracy", 0.0).item():.3f}'
+            'batch_acc': f'{proto_accuracy.item() if hasattr(proto_accuracy, "item") else proto_accuracy:.3f}'
         })
 
         # Update model training state
@@ -336,7 +504,8 @@ def validate_epoch(model, val_loader, device, val_ids, compound_mapping):
             _, loss, metrics = model(xrd_patterns, labels)
 
             total_loss += loss.item()
-            total_batch_accuracy += metrics.get('proto_accuracy', 0.0).item()
+            proto_accuracy = metrics.get('proto_accuracy', 0.0)
+            total_batch_accuracy += proto_accuracy.item() if hasattr(proto_accuracy, 'item') else proto_accuracy
 
     avg_loss = total_loss / len(val_loader)
     avg_batch_accuracy = total_batch_accuracy / len(val_loader)
@@ -462,6 +631,9 @@ def main():
     parser.add_argument('--n_samples', type=int, default=500, help='Number of samples to use')
     parser.add_argument('--lr', type=float, help='Learning rate (overrides config)')
     parser.add_argument('--embedding_dim', type=int, help='Embedding dimension (overrides config)')
+    parser.add_argument('--wandb_project', type=str, default='xrd-classification', help='Wandb project name')
+    parser.add_argument('--wandb_name', type=str, help='Wandb run name')
+    parser.add_argument('--disable_wandb', action='store_true', help='Disable wandb logging')
 
     args = parser.parse_args()
 
@@ -508,10 +680,51 @@ def main():
         device = torch.device(device_config)
     print(f"Using device: {device}")
 
+    # Initialize wandb
+    wandb_config = config.get('wandb', {})
+    use_wandb = WANDB_AVAILABLE and not args.disable_wandb and wandb_config.get('enabled', True)
+    if use_wandb:
+        # Generate run name if not provided
+        if args.wandb_name is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            args.wandb_name = f"xrd_500samples_{timestamp}"
+
+        # Use project from config if not specified in args
+        project_name = args.wandb_project if args.wandb_project != 'xrd-classification' else wandb_config.get('project', 'xrd-classification')
+
+        wandb.init(
+            project=project_name,
+            name=args.wandb_name,
+            entity=wandb_config.get('entity'),
+            tags=wandb_config.get('tags', []),
+            notes=wandb_config.get('notes', ''),
+            config={
+                'n_samples': args.n_samples,
+                'epochs': config['training']['epochs'],
+                'batch_size': config['training']['batch_size'],
+                'learning_rate': config['training']['learning_rate'],
+                'embedding_dim': config['model']['embedding_dim'],
+                'temperature': config['model']['temperature'],
+                'proto_weight': config['model']['proto_weight'],
+                'triplet_weight': config['model']['triplet_weight'],
+                'triplet_margin': config['model']['triplet_margin'],
+                'augmentations_per_sample': config['augmentation']['n_augmentations'],
+                'classical_enabled': config['augmentation']['classical']['enabled'],
+                'diffusion_enabled': config['augmentation']['diffusion']['enabled'],
+                'device': str(device)
+            }
+        )
+        print(f"✅ Wandb initialized: project={args.wandb_project}, run={args.wandb_name}")
+    else:
+        print("⚠️ Wandb logging disabled")
+
     # 1. Load subset data
     dataset_path = resolve_path(config['data']['dataset_path'], config_dir)
     print(f"Loading data from: {dataset_path}")
     data = load_subset_data(dataset_path, n_samples=args.n_samples)
+
+    # 1.5. Duplicate patterns for increased diversity
+    data = duplicate_patterns(data, config)
 
     # 2. Create compound mapping
     compound_mapping = create_subset_mapping(data)
@@ -535,10 +748,40 @@ def main():
         augmenter = None
         config['augmentation']['n_augmentations'] = 0
 
-    # 6. Create data loaders
-    train_loader, val_loader, _ = create_data_loaders(
-        train_ids, val_ids, compound_mapping, config, augmenter
+    # 6. Create custom data loaders that handle pattern duplication
+    from torch.utils.data import DataLoader
+
+    # Create datasets
+    train_dataset = XRDDuplicatedDataset(
+        train_ids, compound_mapping, data, augmenter,
+        samples_per_pattern=config['augmentation']['n_augmentations']
     )
+
+    val_dataset = XRDDuplicatedDataset(
+        val_ids, compound_mapping, data, augmenter,
+        samples_per_pattern=config['augmentation']['n_augmentations']
+    )
+
+    # Create data loaders
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=config['training']['batch_size'],
+        shuffle=True,
+        num_workers=config['training'].get('num_workers', 0),
+        pin_memory=config['training'].get('pin_memory', False)
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=config['training']['batch_size'],
+        shuffle=False,
+        num_workers=config['training'].get('num_workers', 0),
+        pin_memory=config['training'].get('pin_memory', False)
+    )
+
+    print(f"✅ Custom data loaders created:")
+    print(f"   Train: {len(train_dataset)} samples from {len(train_ids)} compounds")
+    print(f"   Val: {len(val_dataset)} samples from {len(val_ids)} compounds")
 
     # 7. Initialize model using config
     model = XRDPrototypicalClassifier(
@@ -603,6 +846,22 @@ def main():
             print("")
         print(f"Val Loss: {val_loss:.4f} | Batch Acc: {val_batch_acc:.3f} | Class Acc: {val_class_acc:.3f}")
         print(f"LR: {current_lr:.6f}")
+
+        # Log to wandb
+        if use_wandb:
+            log_dict = {
+                'epoch': epoch,
+                'train_loss': train_loss,
+                'val_loss': val_loss,
+                'train_batch_accuracy': train_batch_acc,
+                'val_batch_accuracy': val_batch_acc,
+                'val_classification_accuracy': val_class_acc,
+                'learning_rate': current_lr
+            }
+            if train_class_acc is not None:
+                log_dict['train_classification_accuracy'] = train_class_acc
+
+            wandb.log(log_dict)
 
         # Track best model (use classification accuracy)
         if val_class_acc > best_val_accuracy:
@@ -703,6 +962,34 @@ def main():
 
     with open(results_file, 'w') as f:
         json.dump(final_results, f, indent=2)
+
+    # Log final results to wandb
+    if use_wandb:
+        wandb.log({
+            'final_best_val_accuracy': best_val_accuracy,
+            'final_top1_accuracy': eval_results['top1_accuracy'],
+            'final_top5_accuracy': eval_results['top5_accuracy'],
+            'final_eval_samples': eval_results['total_samples'],
+            'training_time_seconds': training_time,
+            'total_epochs': config['training']['epochs']
+        })
+
+        # Log training history as a table
+        wandb.log({"training_history": wandb.Table(
+            columns=["epoch", "train_loss", "val_loss", "train_batch_acc", "val_batch_acc",
+                    "train_class_acc", "val_class_acc", "learning_rate"],
+            data=[[h['epoch'], h['train_loss'], h['val_loss'], h['train_batch_accuracy'],
+                  h['val_batch_accuracy'], h.get('train_classification_accuracy'),
+                  h['val_classification_accuracy'], h['learning_rate']] for h in training_history]
+        )})
+
+        # Save final results as wandb artifact
+        artifact = wandb.Artifact(f"xrd_results_{timestamp}", type="results")
+        artifact.add_file(results_file)
+        wandb.log_artifact(artifact)
+
+        wandb.finish()
+        print(f"✅ Results logged to wandb")
 
     print(f"\n✅ Results saved to: {results_file}")
     print(f"{'='*80}")

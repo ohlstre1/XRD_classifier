@@ -21,18 +21,16 @@ import sys
 from typing import Tuple, List, Optional, Dict, Any
 import warnings
 
-# Add legacy modules to path
-sys.path.append('../legacy')
-
+# Import our new augmentation implementations
 try:
-    from classical_xrd_augmenter import ClassicalXRDAugmenter
+    from .classical_augmenter import ClassicalXRDAugmenter
     CLASSICAL_AVAILABLE = True
 except ImportError:
     CLASSICAL_AVAILABLE = False
     warnings.warn("Classical augmenter not available. Using fallback.")
 
 try:
-    from xrd_pattern_augmenter_refactored import XRDPatternAugmenter
+    from .diffusion_augmenter import DiffusionXRDAugmenter
     DIFFUSION_AVAILABLE = True
 except ImportError:
     DIFFUSION_AVAILABLE = False
@@ -73,7 +71,12 @@ class DualXRDAugmenter:
     def _setup_classical_augmenter(self):
         """Setup classical augmentation system."""
         try:
-            self.classical_augmenter = ClassicalXRDAugmenter(verbose=self.verbose)
+            # Pass classical config to our new augmenter
+            classical_config = self.config['augmentation']['classical']
+            self.classical_augmenter = ClassicalXRDAugmenter(
+                config={'classical': classical_config},
+                verbose=self.verbose
+            )
             if self.verbose:
                 print("✅ Classical augmenter initialized")
         except Exception as e:
@@ -85,17 +88,20 @@ class DualXRDAugmenter:
         """Setup diffusion model augmentation system."""
         try:
             model_path = self.config['augmentation']['diffusion']['model_path']
-            if os.path.exists(model_path):
-                self.diffusion_augmenter = XRDPatternAugmenter(
-                    model_path=model_path,
-                    device='auto',
-                    verbose=self.verbose
-                )
+
+            # Use our new diffusion augmenter
+            self.diffusion_augmenter = DiffusionXRDAugmenter(
+                model_path=model_path,
+                device='auto',
+                verbose=self.verbose
+            )
+
+            if self.diffusion_augmenter.is_available:
                 if self.verbose:
                     print("✅ Diffusion augmenter initialized")
             else:
                 if self.verbose:
-                    print(f"⚠️ Diffusion model not found at {model_path}")
+                    print(f"⚠️ Diffusion model not available at {model_path}")
                 self.diffusion_augmenter = None
         except Exception as e:
             if self.verbose:
@@ -146,54 +152,15 @@ class DualXRDAugmenter:
             # Fallback: simple noise addition
             return self._fallback_augmentation(pattern, num_samples)
 
-        augmented_samples = []
-        config = self.config['augmentation']['classical']
-
-        for i in range(num_samples):
-            # Start with original pattern
-            augmented = pattern.clone() if torch.is_tensor(pattern) else torch.tensor(pattern)
-
-            # Ensure correct shape [L] for classical augmenter
-            if augmented.dim() > 1:
-                augmented = augmented.squeeze()
-
-            # Apply classical augmentations
-            try:
-                # Peak broadening
-                if config.get('peak_broadening', {}).get('enabled', True):
-                    broadening_range = config.get('peak_broadening', {}).get('broadening_range', [0.5, 2.0])
-                    broadening_factor = np.random.uniform(*broadening_range)
-                    augmented = self.classical_augmenter.add_peak_broadening(
-                        augmented, broadening_factor=broadening_factor
-                    )
-
-                # Intensity variations
-                if config.get('intensity_variation', {}).get('enabled', True):
-                    scale_range = config.get('intensity_variation', {}).get('scale_range', [0.8, 1.2])
-                    scale_factor = np.random.uniform(*scale_range)
-                    augmented = augmented * scale_factor
-
-                # Background noise
-                if config.get('background_noise', {}).get('enabled', True):
-                    noise_range = config.get('background_noise', {}).get('noise_level_range', [0.01, 0.1])
-                    noise_level = np.random.uniform(*noise_range)
-                    noise = torch.randn_like(augmented) * noise_level
-                    augmented = augmented + noise
-
-                # Ensure proper shape [1, L]
-                if augmented.dim() == 1:
-                    augmented = augmented.unsqueeze(0)
-
-                augmented_samples.append(augmented)
-
-            except Exception as e:
-                if self.verbose:
-                    print(f"⚠️ Classical augmentation failed for sample {i}: {e}")
-                # Use fallback
-                fallback = self._fallback_augmentation(pattern, 1)
-                augmented_samples.append(fallback[0])
-
-        return torch.stack(augmented_samples)
+        try:
+            # Use our new classical augmenter
+            augmented = self.classical_augmenter.augment_pattern(pattern, num_samples)
+            return augmented
+        except Exception as e:
+            if self.verbose:
+                print(f"⚠️ Classical augmentation failed: {e}")
+            # Use fallback
+            return self._fallback_augmentation(pattern, num_samples)
 
     def augment_pattern_diffusion(self, pattern: torch.Tensor, num_samples: int) -> torch.Tensor:
         """

@@ -29,3 +29,4 @@ best_model.pth
 diffusion/wandb
 2025-11-01-give-me-cli-command-what-program-was-last-changed.txt
 *.pth
+XRD-classification/scripts/wandb
