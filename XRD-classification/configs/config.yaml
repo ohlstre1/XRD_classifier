@@ -19,7 +19,7 @@ data:
 # =============================================================================
 augmentation:
   # Total augmentation strategy (reduced to prevent overfitting)
-  n_augmentations: 10  # Reduced from 10 to prevent synthetic data dominance
+  n_augmentations: 5  # Reduced from 10 to prevent synthetic data dominance
 
   # Classical augmentation (from legacy/classical_xrd_augmenter.py)
   classical:
@@ -62,8 +62,8 @@ augmentation:
 # Model Architecture
 # =============================================================================
 model:
-  embedding_dim: 256
-  temperature: 0.1
+  embedding_dim: 1024
+  temperature: 0.3
 
   # Loss settings
   proto_weight: 1.0
@@ -74,10 +74,10 @@ model:
 # Training Hyperparameters
 # =============================================================================
 training:
-  batch_size: 16
-  epochs: 15
-  learning_rate: 0.000001
-  min_lr: 0.0000001
+  batch_size: 32
+  epochs: 10
+  learning_rate: 0.000005
+  min_lr: 0.0000005
   weight_decay: 0.0000001
 
   # Data loading (disabled multiprocessing and pin_memory to avoid CUDA issues)
@@ -94,15 +94,15 @@ pattern_processing:
   # Duplicate synthetic patterns to increase base diversity
   pattern_duplication:
     enabled: true
-    duplication_factor: 1  # Each synthetic pattern creates 2 copies (total 3 including original)
+    duplication_factor: 2  # Each synthetic pattern creates 2 copies (total 3 including original)
     duplication_noise: 0  # Small noise variation between duplicates
 
 # =============================================================================
 # Data Split
 # =============================================================================
 data_split:
-  train_ratio: 0.8
-  val_ratio: 0.2
+  train_ratio: 1
+  val_ratio: 0.4
   random_seed: 42
 
 # =============================================================================
