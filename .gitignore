@@ -31,6 +31,6 @@ diffusion/wandb
 *.pth
 XRD-classification/scripts/wandb
 XRD-classification/results
-./XRD-classification/data/processed/compound_mapping.json
-./data/xrd_dataset_labeled_dtw_window.pt
-./legacy/xrd_classifier_model.pth
+XRD-classification/data/processed/compound_mapping.json
+data/xrd_dataset_labeled_dtw_window.pt
+legacy/xrd_classifier_model.pth
