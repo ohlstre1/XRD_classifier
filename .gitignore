@@ -30,3 +30,7 @@ diffusion/wandb
 2025-11-01-give-me-cli-command-what-program-was-last-changed.txt
 *.pth
 XRD-classification/scripts/wandb
+XRD-classification/results
+./XRD-classification/data/processed/compound_mapping.json
+./data/xrd_dataset_labeled_dtw_window.pt
+./legacy/xrd_classifier_model.pth
