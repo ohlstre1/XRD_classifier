@@ -69,6 +69,54 @@ def main():
 
     print(f"Dataset split: Train={len(train_dataset)}, Val={len(val_dataset)}, Test={len(test_dataset)}")
 
+    # Get indices for each split
+    train_indices = train_dataset.indices
+    val_indices = val_dataset.indices
+    test_indices = test_dataset.indices
+
+    # Combine train and validation indices
+    train_val_indices = np.concatenate([train_indices, val_indices])
+
+    # Save combined train+val dataset
+    train_val_dataset_dict = {
+        "synth_xrd": synth_xrd[train_val_indices],
+        "real_xrd": real_xrd[train_val_indices],
+        "fast_dtw_distance": global_temperature[train_val_indices],
+        "indices": train_val_indices,
+        "original_dataset_size": len(synth_xrd),
+        "split": "train_val_combined"
+    }
+    torch.save(train_val_dataset_dict, "../data/xrd_train_val_dataset.pt")
+    print(f"Combined train+val dataset saved with {len(train_val_indices)} samples")
+
+    # Save test dataset separately
+    test_dataset_dict = {
+        "synth_xrd": synth_xrd[test_indices],
+        "real_xrd": real_xrd[test_indices],
+        "fast_dtw_distance": global_temperature[test_indices],
+        "indices": test_indices,
+        "original_dataset_size": len(synth_xrd),
+        "split": "test"
+    }
+    torch.save(test_dataset_dict, "../data/xrd_test_dataset.pt")
+    print(f"Test dataset saved with {len(test_indices)} samples")
+
+    # Save split summary
+    split_summary = {
+        "train_val_indices": train_val_indices.tolist() if hasattr(train_val_indices, 'tolist') else list(train_val_indices),
+        "test_indices": list(test_indices),
+        "train_val_size": len(train_val_indices),
+        "test_size": len(test_indices),
+        "total_size": len(synth_xrd),
+        "random_seed": 42,
+        "original_train_size": len(train_indices),
+        "original_val_size": len(val_indices)
+    }
+    import json
+    with open("../data/dataset_split_summary.json", "w") as f:
+        json.dump(split_summary, f, indent=2)
+    print(f"Split summary saved to ../data/dataset_split_summary.json")
+
     # Create dataloaders
     train_dataloader = DataLoader(
         train_dataset,
