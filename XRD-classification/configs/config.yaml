@@ -5,7 +5,16 @@
 # Data Paths
 # =============================================================================
 data:
-  # Existing dataset
+  # Synthetic training dataset (full dataset for training)
+  synthetic_train_path: '../../data/xrd_dataset_labeled_dtw_window.pt'
+
+  # Real validation dataset
+  real_val_path: '../../data/xrd_train_val_dataset.pt'
+
+  # Real test dataset
+  real_test_path: '../../data/xrd_test_dataset.pt'
+
+  # Legacy path for backward compatibility
   dataset_path: '../../data/xrd_dataset_labeled_dtw_window.pt'
 
   # Processed data paths
@@ -104,6 +113,12 @@ data_split:
   train_ratio: 1
   val_ratio: 0.4
   random_seed: 42
+
+  # Sample limiting for consistent dataset sizes
+  # Set to null to use all available samples
+  max_train_samples: 100  # Limits synthetic training samples
+  max_val_samples: 100    # Limits real validation samples
+  max_test_samples: 100   # Limits real test samples
 
 # =============================================================================
 # Evaluation

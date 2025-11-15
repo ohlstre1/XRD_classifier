@@ -33,11 +33,16 @@ from utils.data_loading import (
     load_subset_data,
     duplicate_patterns,
     create_subset_mapping,
-    create_subset_split
+    create_subset_split,
+    load_synthetic_data,
+    load_real_val_data,
+    load_real_test_data,
+    create_synthetic_real_split,
+    create_combined_mapping
 )
-from utils.datasets import XRDDuplicatedDataset
+from utils.datasets import XRDDuplicatedDataset, XRDSyntheticTrainDataset, XRDRealEvalDataset
 from utils.training import train_epoch, validate_epoch, TrainingTracker
-from utils.evaluation import evaluate_on_real_patterns
+from utils.evaluation import evaluate_on_real_patterns, evaluate_cross_set
 from utils.prototypes import compute_prototypes, PrototypeBank
 
 from torch.utils.data import DataLoader
@@ -66,13 +71,15 @@ def resolve_path(path: str, config_dir: str) -> str:
     return os.path.join(config_dir, path)
 
 
-def setup_wandb(config: dict, args: argparse.Namespace) -> bool:
+def setup_wandb(config: dict, args: argparse.Namespace, val_samples: int = None, test_samples: int = None) -> bool:
     """
     Setup wandb logging if available and enabled.
 
     Args:
         config: Configuration dictionary
         args: Command line arguments
+        val_samples: Number of validation samples
+        test_samples: Number of test samples
 
     Returns:
         True if wandb is initialized, False otherwise
@@ -88,6 +95,10 @@ def setup_wandb(config: dict, args: argparse.Namespace) -> bool:
         project_name = args.wandb_project if args.wandb_project != 'xrd-classification' \
             else wandb_config.get('project', 'xrd-classification')
 
+        # Use provided samples or default to n_samples
+        val_samples = val_samples if val_samples is not None else args.n_samples
+        test_samples = test_samples if test_samples is not None else args.n_samples
+
         wandb.init(
             project=project_name,
             name=args.wandb_name,
@@ -96,6 +107,8 @@ def setup_wandb(config: dict, args: argparse.Namespace) -> bool:
             notes=wandb_config.get('notes', ''),
             config={
                 'n_samples': args.n_samples,
+                'val_samples': val_samples,
+                'test_samples': test_samples,
                 'epochs': config['training']['epochs'],
                 'batch_size': config['training']['batch_size'],
                 'learning_rate': config['training']['learning_rate'],
@@ -117,33 +130,34 @@ def setup_wandb(config: dict, args: argparse.Namespace) -> bool:
 
 
 def create_data_loaders(config: dict,
+                         train_data: dict,
+                         val_data: dict,
                          train_ids: list,
                          val_ids: list,
-                         compound_mapping: dict,
-                         data: dict,
                          augmenter: object) -> tuple:
     """
     Create training and validation data loaders.
 
     Args:
         config: Configuration dictionary
+        train_data: Synthetic training data
+        val_data: Real validation data
         train_ids: List of training compound IDs
         val_ids: List of validation compound IDs
-        compound_mapping: Compound mapping dictionary
-        data: Data dictionary
-        augmenter: Augmenter object
+        augmenter: Augmenter object (only used for training)
 
     Returns:
         Tuple of (train_loader, val_loader)
     """
-    train_dataset = XRDDuplicatedDataset(
-        train_ids, compound_mapping, data, augmenter,
+    # Training dataset: synthetic patterns with augmentation
+    train_dataset = XRDSyntheticTrainDataset(
+        train_data, train_ids, augmenter,
         samples_per_pattern=config['augmentation']['n_augmentations']
     )
 
-    val_dataset = XRDDuplicatedDataset(
-        val_ids, compound_mapping, data, augmenter,
-        samples_per_pattern=config['augmentation']['n_augmentations']
+    # Validation dataset: real patterns without augmentation (NEVER augmented)
+    val_dataset = XRDRealEvalDataset(
+        val_data, val_ids
     )
 
     train_loader = DataLoader(
@@ -163,8 +177,8 @@ def create_data_loaders(config: dict,
     )
 
     print(f"✅ Data loaders created:")
-    print(f"   Train: {len(train_dataset)} samples from {len(train_ids)} compounds")
-    print(f"   Val: {len(val_dataset)} samples from {len(val_ids)} compounds")
+    print(f"   Train: {len(train_dataset)} augmented samples from {len(train_ids)} synthetic compounds")
+    print(f"   Val: {len(val_dataset)} real samples from {len(val_ids)} compounds (no augmentation)")
 
     return train_loader, val_loader
 
@@ -292,7 +306,12 @@ def main():
                         help='Path to config file')
     parser.add_argument('--epochs', type=int, help='Number of epochs (overrides config)')
     parser.add_argument('--batch_size', type=int, help='Batch size (overrides config)')
-    parser.add_argument('--n_samples', type=int, default=500, help='Number of samples to use')
+    parser.add_argument('--n_samples', type=int, default=500, help='Total number of compounds to use')
+    parser.add_argument('--val_samples', type=int, help='Number of validation samples (deprecated, use ratios)')
+    parser.add_argument('--test_samples', type=int, help='Number of test samples (deprecated, use ratios)')
+    parser.add_argument('--train_ratio', type=float, default=0.6, help='Ratio of samples for training (default: 0.6)')
+    parser.add_argument('--val_ratio', type=float, default=0.2, help='Ratio of samples for validation (default: 0.2)')
+    parser.add_argument('--test_ratio', type=float, default=0.2, help='Ratio of samples for testing (default: 0.2)')
     parser.add_argument('--lr', type=float, help='Learning rate (overrides config)')
     parser.add_argument('--embedding_dim', type=int, help='Embedding dimension (overrides config)')
     parser.add_argument('--wandb_project', type=str, default='xrd-classification',
@@ -322,12 +341,38 @@ def main():
     if args.embedding_dim is not None:
         config['model']['embedding_dim'] = args.embedding_dim
 
+    # Calculate sample splits based on ratios
+    # Normalize ratios if they don't sum to 1
+    total_ratio = args.train_ratio + args.val_ratio + args.test_ratio
+    train_ratio = args.train_ratio / total_ratio
+    val_ratio = args.val_ratio / total_ratio
+    test_ratio = args.test_ratio / total_ratio
+
+    # Calculate actual sample numbers for disjoint splits
+    total_compounds = min(args.n_samples, 2000)  # Limited by test set size
+    n_train = int(total_compounds * train_ratio)
+    n_val = int(total_compounds * val_ratio)
+    n_test = total_compounds - n_train - n_val  # Remainder goes to test
+
+    # For backward compatibility with old arguments
+    if args.val_samples is not None or args.test_samples is not None:
+        print("Warning: --val_samples and --test_samples are deprecated. Use --train_ratio, --val_ratio, --test_ratio instead.")
+        val_samples = args.val_samples if args.val_samples is not None else n_val
+        test_samples = args.test_samples if args.test_samples is not None else n_test
+    else:
+        val_samples = n_val
+        test_samples = n_test
+
     print("=" * 80)
-    print(f"XRD Prototypical Classification - {args.n_samples} Sample Pipeline (Modular)")
+    print(f"XRD Prototypical Classification - {total_compounds} Total Compounds")
     print("=" * 80)
     print(f"Configuration:")
     print(f"  Config file: {config_path}")
-    print(f"  Samples: {args.n_samples}")
+    print(f"  Total compounds: {total_compounds}")
+    print(f"  Split ratios: {train_ratio:.1%} / {val_ratio:.1%} / {test_ratio:.1%}")
+    print(f"  Train compounds: {n_train} (indices 0-{n_train-1})")
+    print(f"  Val compounds: {val_samples} (indices {n_train}-{n_train+val_samples-1})")
+    print(f"  Test compounds: {test_samples} (indices {n_train+val_samples}-{n_train+val_samples+test_samples-1})")
     print(f"  Epochs: {config['training']['epochs']}")
     print(f"  Batch size: {config['training']['batch_size']}")
     print(f"  Learning rate: {config['training']['learning_rate']}")
@@ -342,30 +387,69 @@ def main():
         device = torch.device(device_config)
     print(f"Using device: {device}")
 
-    use_wandb = setup_wandb(config, args)
+    use_wandb = setup_wandb(config, args, val_samples, test_samples)
 
-    dataset_path = resolve_path(config['data']['dataset_path'], config_dir)
-    print(f"\nLoading data from: {dataset_path}")
-    data = load_subset_data(dataset_path, n_samples=args.n_samples)
+    # Load all three datasets
+    synthetic_train_path = resolve_path(config['data']['synthetic_train_path'], config_dir)
+    real_val_path = resolve_path(config['data']['real_val_path'], config_dir)
+    real_test_path = resolve_path(config['data']['real_test_path'], config_dir)
 
-    data = duplicate_patterns(data, config)
+    print(f"\n{'='*50}")
+    print("LOADING DATASETS")
+    print(f"{'='*50}")
 
-    compound_mapping = create_subset_mapping(data)
+    # Create disjoint indices for train/val/test splits
+    if total_compounds < 13325:  # Need to subset the data
+        train_indices = list(range(0, n_train))
+        val_indices = list(range(n_train, n_train + val_samples))
+        test_indices = list(range(n_train + val_samples, n_train + val_samples + test_samples))
 
-    split_info = create_subset_split(compound_mapping)
+        print(f"Using disjoint compound splits:")
+        print(f"  Train: compounds {train_indices[0]}-{train_indices[-1]}")
+        print(f"  Val: compounds {val_indices[0]}-{val_indices[-1]}")
+        print(f"  Test: compounds {test_indices[0]}-{test_indices[-1]}")
+
+        # Load synthetic training data with specific indices
+        train_data = load_subset_data(synthetic_train_path, n_samples=n_train, indices=train_indices)
+
+        # Apply duplication to synthetic training data if configured
+        train_data = duplicate_patterns(train_data, config)
+
+        # Load real validation and test data with disjoint indices
+        val_data = load_real_val_data(real_val_path, indices=val_indices)
+        test_data = load_real_test_data(real_test_path, indices=test_indices)
+
+        use_disjoint = True
+    else:
+        # Use all available data
+        train_data = load_synthetic_data(synthetic_train_path)
+        train_data = duplicate_patterns(train_data, config)
+        val_data = load_real_val_data(real_val_path)
+        test_data = load_real_test_data(real_test_path)
+        use_disjoint = False
+
+    # Create split information - don't use common compounds for disjoint splits
+    split_info = create_synthetic_real_split(train_data, val_data, test_data,
+                                            use_common_compounds=False)  # Each split has different compounds
     train_ids = split_info['train']
     val_ids = split_info['val']
+    test_ids = split_info['test']
 
+    # Create compound mapping for all datasets
+    compound_mapping = create_combined_mapping(train_data, val_data, test_data, split_info)
+
+    # Initialize augmenter for training only
     try:
         augmenter = DualXRDAugmenter(config, verbose=config.get('logging', {}).get('verbose', True))
-        print(f"✅ Augmenter initialized with methods: {augmenter.get_available_methods()}")
+        print(f"✅ Augmenter initialized for training with methods: {augmenter.get_available_methods()}")
     except Exception as e:
         print(f"⚠️ Augmenter failed, using no augmentation: {e}")
         augmenter = None
         config['augmentation']['n_augmentations'] = 0
 
+    # Create data loaders (augmenter only used for training)
     train_loader, val_loader = create_data_loaders(
-        config, train_ids, val_ids, compound_mapping, data, augmenter
+        config, train_data, val_data, train_ids, val_ids, augmenter
     )
 
     model = XRDPrototypicalClassifier(
@@ -388,14 +472,50 @@ def main():
     print("PROTOTYPE COMPUTATION")
     print(f"{'='*50}")
 
-    prototypes = compute_prototypes(model, val_loader, device)
+    # Compute prototypes from TRAINING data (not validation)
+    # Create a loader without augmentation for clean prototype computation
+    from utils.datasets import XRDSyntheticTrainDataset
+    proto_dataset = XRDSyntheticTrainDataset(
+        train_data, train_ids, augmenter=None, samples_per_pattern=1
+    )
+    proto_loader = DataLoader(
+        proto_dataset,
+        batch_size=config['training']['batch_size'],
+        shuffle=False,
+        num_workers=0,
+        pin_memory=False
+    )
+    prototypes = compute_prototypes(model, proto_loader, device)
+    print(f"  Computed {len(prototypes)} prototypes from training data")
 
     print(f"\n{'='*50}")
-    print("EVALUATION ON REAL PATTERNS")
+    print("VALIDATION EVALUATION (REAL PATTERNS)")
     print(f"{'='*50}")
 
-    eval_results = evaluate_on_real_patterns(
-        model, prototypes, compound_mapping, val_ids, device
+    # Use cross-set evaluation for validation against training prototypes
+    val_eval_results = evaluate_cross_set(
+        model, prototypes, val_loader, val_ids, train_ids, device,
+        k_values=config.get('evaluation', {}).get('top_k_values', [1, 5, 10])
+    )
+
+    print(f"\n{'='*50}")
+    print("TEST EVALUATION (REAL PATTERNS)")
+    print(f"{'='*50}")
+
+    # Create test data loader (real patterns, no augmentation)
+    test_dataset = XRDRealEvalDataset(test_data, test_ids)
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=config['training']['batch_size'],
+        shuffle=False,
+        num_workers=config['training'].get('num_workers', 0),
+        pin_memory=config['training'].get('pin_memory', False)
+    )
+
+    # Evaluate test set against TRAINING prototypes (not computing new prototypes)
+    test_eval_results = evaluate_cross_set(
+        model, prototypes, test_loader, test_ids, train_ids, device,
+        k_values=config.get('evaluation', {}).get('top_k_values', [1, 5, 10])
     )
 
     print(f"\n{'='*80}")
@@ -416,33 +536,45 @@ def main():
         'data_split': {
             'train_compounds': len(train_ids),
             'val_compounds': len(val_ids),
+            'test_compounds': len(test_ids),
             'train_samples': len(train_loader.dataset),
-            'val_samples': len(val_loader.dataset)
+            'val_samples': len(val_loader.dataset),
+            'test_samples': len(test_dataset)
         },
         'training': {
             'best_val_classification_accuracy': tracker.best_val_accuracy,
             'best_epoch': tracker.best_epoch,
             'training_time_seconds': training_time
         },
-        'evaluation': eval_results,
+        'validation_evaluation': val_eval_results,
+        'test_evaluation': test_eval_results,
         'model_info': model.get_model_info(),
         'training_history': tracker.training_history
     }
 
-    print(f"Dataset: {args.n_samples} samples ({len(train_ids)} train, {len(val_ids)} val)")
-    print(f"Training: {config['training']['epochs']} epochs, best val acc: {tracker.best_val_accuracy:.3f}")
-    print(f"Real pattern evaluation (final):")
-    print(f"  Top-1 accuracy: {eval_results['top1_accuracy']:.3f}")
-    print(f"  Top-5 accuracy: {eval_results['top5_accuracy']:.3f}")
+    print(f"Dataset:")
+    print(f"  Train: {len(train_ids)} synthetic compounds ({len(train_loader.dataset)} augmented samples)")
+    print(f"  Val: {len(val_ids)} real compounds")
+    print(f"  Test: {len(test_ids)} real compounds")
+    print(f"\nTraining: {config['training']['epochs']} epochs, best val acc: {tracker.best_val_accuracy:.3f}")
+    print(f"\nValidation evaluation (real patterns):")
+    print(f"  Top-1 accuracy: {val_eval_results['top1_accuracy']:.3f}")
+    print(f"  Top-5 accuracy: {val_eval_results['top5_accuracy']:.3f}")
+    print(f"\nTest evaluation (real patterns):")
+    print(f"  Top-1 accuracy: {test_eval_results['top1_accuracy']:.3f}")
+    print(f"  Top-5 accuracy: {test_eval_results['top5_accuracy']:.3f}")
 
     results_file = save_results(final_results)
 
     if use_wandb:
         wandb.log({
             'final_best_val_accuracy': tracker.best_val_accuracy,
-            'final_top1_accuracy': eval_results['top1_accuracy'],
-            'final_top5_accuracy': eval_results['top5_accuracy'],
-            'final_eval_samples': eval_results['total_samples'],
+            'final_val_top1_accuracy': val_eval_results['top1_accuracy'],
+            'final_val_top5_accuracy': val_eval_results['top5_accuracy'],
+            'final_val_eval_samples': val_eval_results['total_samples'],
+            'final_test_top1_accuracy': test_eval_results['top1_accuracy'],
+            'final_test_top5_accuracy': test_eval_results['top5_accuracy'],
+            'final_test_eval_samples': test_eval_results['total_samples'],
             'training_time_seconds': training_time,
             'total_epochs': config['training']['epochs']
         })

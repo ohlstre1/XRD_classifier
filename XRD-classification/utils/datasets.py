@@ -106,3 +106,101 @@ class XRDSimpleDataset(Dataset):
             pattern = pattern.unsqueeze(0)
 
         return pattern, self.labels[idx], self.compound_ids[idx]
+
+
+class XRDSyntheticTrainDataset(Dataset):
+    """
+    Dataset for synthetic XRD training patterns with augmentation support.
+
+    Only synthetic patterns are used for training, with augmentations applied.
+    """
+
+    def __init__(self,
+                 train_data: dict,
+                 compound_ids: List[str],
+                 augmenter: Optional[object] = None,
+                 samples_per_pattern: int = 5):
+        """
+        Initialize synthetic training dataset.
+
+        Args:
+            train_data: Training data dictionary
+            compound_ids: List of compound IDs
+            augmenter: Augmenter object for pattern augmentation
+            samples_per_pattern: Number of augmented samples per base pattern
+        """
+        self.synth_patterns = train_data['synth_xrd']
+        self.compound_ids = compound_ids
+        self.augmenter = augmenter
+        self.samples_per_pattern = samples_per_pattern if augmenter is not None else 1
+
+        # Create label mapping
+        unique_ids = sorted(set(compound_ids))
+        self.id_to_label = {cid: idx for idx, cid in enumerate(unique_ids)}
+
+        print(f"XRDSyntheticTrainDataset: {len(compound_ids)} compounds, {samples_per_pattern} augmentations each")
+
+    def __len__(self):
+        return len(self.compound_ids) * self.samples_per_pattern
+
+    def __getitem__(self, idx):
+        """Get augmented synthetic pattern."""
+        compound_idx = idx // self.samples_per_pattern
+        compound_id = self.compound_ids[compound_idx]
+
+        # Get synthetic pattern
+        base_pattern = self.synth_patterns[compound_idx]
+
+        # Apply augmentation if available
+        if self.augmenter is not None:
+            augmented_pattern, _ = self.augmenter.augment_pattern_mixed(base_pattern, num_samples=1)
+            pattern_tensor = augmented_pattern[0]
+        else:
+            pattern_tensor = base_pattern.unsqueeze(0)
+
+        label = self.id_to_label[compound_id]
+
+        return pattern_tensor, label, compound_id
+
+
+class XRDRealEvalDataset(Dataset):
+    """
+    Dataset for real XRD patterns used in validation/testing.
+
+    IMPORTANT: Real patterns are NEVER augmented - they are used as-is for evaluation.
+    """
+
+    def __init__(self,
+                 real_data: dict,
+                 compound_ids: List[str]):
+        """
+        Initialize real pattern evaluation dataset.
+
+        Args:
+            real_data: Real data dictionary
+            compound_ids: List of compound IDs
+
+        Note: No augmenter parameter - real patterns are never augmented.
+        """
+        self.real_patterns = real_data['real_xrd']
+        self.compound_ids = compound_ids
+
+        # Create label mapping
+        unique_ids = sorted(set(compound_ids))
+        self.id_to_label = {cid: idx for idx, cid in enumerate(unique_ids)}
+
+        print(f"XRDRealEvalDataset: {len(compound_ids)} compounds (no augmentation)")
+
+    def __len__(self):
+        return len(self.compound_ids)
+
+    def __getitem__(self, idx):
+        """Get raw real pattern without any augmentation."""
+        compound_id = self.compound_ids[idx]
+
+        # Get real pattern (never augmented)
+        pattern = self.real_patterns[idx].unsqueeze(0)
+
+        label = self.id_to_label[compound_id]
+
+        return pattern, label, compound_id
