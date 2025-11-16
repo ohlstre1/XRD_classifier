@@ -316,7 +316,10 @@ def load_real_test_data(dataset_path: str, n_samples: int = None, indices: List[
 
 
 def create_synthetic_real_split(train_data: dict, val_data: dict, test_data: dict,
-                               use_common_compounds: bool = False) -> dict:
+                               use_common_compounds: bool = False,
+                               train_indices: List[int] = None,
+                               val_indices: List[int] = None,
+                               test_indices: List[int] = None) -> dict:
     """
     Create train/val/test split info using synthetic and real data.
 
@@ -325,6 +328,9 @@ def create_synthetic_real_split(train_data: dict, val_data: dict, test_data: dic
         val_data: Real validation data
         test_data: Real test data
         use_common_compounds: If True, uses same compound IDs across datasets
+        train_indices: Original dataset indices for training compounds
+        val_indices: Original dataset indices for validation compounds
+        test_indices: Original dataset indices for test compounds
 
     Returns:
         Split information dictionary
@@ -351,10 +357,22 @@ def create_synthetic_real_split(train_data: dict, val_data: dict, test_data: dic
         val_ids = [f"compound_{i:05d}" for i in range(n_val)]
         test_ids = [f"compound_{i:05d}" for i in range(n_test)]
     else:
-        # Create separate compound IDs for each dataset
-        train_ids = [f"train_compound_{i:05d}" for i in range(n_train)]
-        val_ids = [f"val_compound_{i:05d}" for i in range(n_val)]
-        test_ids = [f"test_compound_{i:05d}" for i in range(n_test)]
+        # For disjoint sets, use the original indices to create consistent IDs
+        # This ensures we can track which compounds came from which part of the original dataset
+        if train_indices is not None:
+            train_ids = [f"compound_{idx:05d}" for idx in train_indices]
+        else:
+            train_ids = [f"compound_{i:05d}" for i in range(n_train)]
+
+        if val_indices is not None:
+            val_ids = [f"compound_{idx:05d}" for idx in val_indices]
+        else:
+            val_ids = [f"compound_{n_train + i:05d}" for i in range(n_val)]
+
+        if test_indices is not None:
+            test_ids = [f"compound_{idx:05d}" for idx in test_indices]
+        else:
+            test_ids = [f"compound_{n_train + n_val + i:05d}" for i in range(n_test)]
 
     split_info = {
         'train': train_ids,

@@ -163,21 +163,8 @@ def evaluate_on_real_patterns(model: torch.nn.Module,
     }
 
 
-def compute_batch_accuracy(predictions: torch.Tensor, labels: torch.Tensor) -> float:
-    """
-    Compute batch-level accuracy.
-
-    Args:
-        predictions: Model predictions
-        labels: Ground truth labels
-
-    Returns:
-        Accuracy as a float
-    """
-    _, predicted = torch.max(predictions, 1)
-    correct = (predicted == labels).sum().item()
-    total = labels.size(0)
-    return correct / total if total > 0 else 0.0
+# Note: batch_accuracy removed as it's meaningless for prototypical learning
+# with dynamic class indices per batch in synthetic-to-real transfer
 
 
 def evaluate_cross_set(model: torch.nn.Module,
@@ -188,25 +175,32 @@ def evaluate_cross_set(model: torch.nn.Module,
                        device: torch.device,
                        k_values: List[int] = [1, 5, 10]) -> Dict:
     """
-    Evaluate a dataset against prototypes from a different dataset (cross-set evaluation).
-    Used for evaluating validation/test sets against training prototypes.
+    Evaluate real data against synthetic training prototypes (synthetic-to-real transfer).
+
+    This function evaluates how well a model trained on synthetic XRD patterns
+    can identify real measured XRD patterns of the same compounds.
+
+    For each real pattern in val/test:
+    1. Find the k-nearest synthetic prototypes
+    2. Check if the correct compound's synthetic prototype is in top-k
+    3. Compute top-k accuracy
 
     Args:
         model: Trained model
-        prototypes: Dictionary of training prototypes
-        eval_loader: DataLoader for evaluation set (val or test)
-        eval_ids: List of evaluation compound IDs
-        train_ids: List of training compound IDs
+        prototypes: Dictionary of synthetic training prototypes
+        eval_loader: DataLoader for real evaluation set (val or test)
+        eval_ids: List of evaluation compound IDs (real data)
+        train_ids: List of training compound IDs (synthetic data)
         device: Device to run evaluation on
         k_values: List of k values for top-k accuracy
 
     Returns:
         Dictionary with evaluation metrics
     """
-    print("Evaluating against training prototypes...")
+    print("Evaluating real patterns against synthetic prototypes...")
     model.eval()
 
-    # Get training prototypes only
+    # Get synthetic training prototypes
     train_prototypes = {k: v for k, v in prototypes.items() if k in train_ids}
     if len(train_prototypes) == 0:
         print("Warning: No training prototypes found!")
@@ -215,48 +209,67 @@ def evaluate_cross_set(model: torch.nn.Module,
     prototype_embeddings = np.stack(list(train_prototypes.values()))
     prototype_ids = list(train_prototypes.keys())
 
+    # For synthetic-to-real evaluation
     correct_counts = {k: 0 for k in k_values}
     total_samples = 0
+    per_compound_results = {}
 
     with torch.no_grad():
         for xrd_patterns, labels, batch_compound_ids in tqdm(eval_loader, desc='Evaluating'):
             xrd_patterns = xrd_patterns.to(device)
             embeddings = model.backbone(xrd_patterns).cpu().numpy()
 
-            for embedding, label in zip(embeddings, labels):
-                # Find nearest training prototypes
+            for embedding, label, compound_id in zip(embeddings, labels, batch_compound_ids):
+                # Find nearest synthetic prototypes
                 similarities = np.dot(prototype_embeddings, embedding)
                 top_indices = np.argsort(similarities)[::-1]
+                top_prototype_ids = [prototype_ids[i] for i in top_indices]
 
-                # For cross-set evaluation, we check if predicted class matches actual label
-                # The label corresponds to position in eval set, but we need to match to train prototype
-                predicted_train_idx = top_indices[0]
-
-                # Count as correct if the nearest prototype is reasonable
-                # Since we have disjoint sets, we'll measure nearest neighbor accuracy
+                # Check if correct synthetic prototype is in top-k
+                # For same-compound evaluation: compound_00005 should match compound_00005
                 for k in k_values:
-                    if k == 1:
-                        # For top-1, we can't really evaluate cross-set properly
-                        # Just measure if it found a prototype
-                        correct_counts[k] += 1  # Always count as finding a prototype
-                    else:
-                        # For top-k, check if any of top-k are close
+                    top_k_ids = top_prototype_ids[:k]
+                    # Exact compound ID matching
+                    is_correct = compound_id in top_k_ids
+                    if is_correct:
                         correct_counts[k] += 1
+
+                # Store per-compound results
+                if compound_id not in per_compound_results:
+                    per_compound_results[compound_id] = []
+                per_compound_results[compound_id].append({
+                    'top_match': top_prototype_ids[0],
+                    'similarity': float(similarities[top_indices[0]]),
+                    'correct': compound_id == top_prototype_ids[0]
+                })
 
                 total_samples += 1
 
-    results = {
-        f'top{k}_accuracy': correct_counts[k] / total_samples if total_samples > 0 else 0.0
-        for k in k_values
-    }
+    # Compute accuracy metrics
+    results = {}
+    for k in k_values:
+        accuracy = correct_counts[k] / total_samples if total_samples > 0 else 0.0
+        results[f'top{k}_accuracy'] = accuracy
+
+    # Compute per-compound accuracy
+    compound_accuracies = []
+    for compound_id, results_list in per_compound_results.items():
+        compound_accuracy = sum(r['correct'] for r in results_list) / len(results_list)
+        compound_accuracies.append(compound_accuracy)
+
     results['total_samples'] = total_samples
     results['num_prototypes'] = len(train_prototypes)
+    results['num_eval_compounds'] = len(per_compound_results)
+    results['per_compound_accuracy'] = np.mean(compound_accuracies) if compound_accuracies else 0.0
+    results['per_compound_std'] = np.std(compound_accuracies) if compound_accuracies else 0.0
 
-    print(f"✅ Evaluation completed:")
+    print(f"✅ Synthetic-to-Real Evaluation completed:")
     print(f"   Samples evaluated: {total_samples}")
-    print(f"   Training prototypes used: {len(train_prototypes)}")
+    print(f"   Unique compounds evaluated: {len(per_compound_results)}")
+    print(f"   Synthetic prototypes used: {len(train_prototypes)}")
     for k in k_values:
         print(f"   Top-{k} accuracy: {results[f'top{k}_accuracy']:.3f}")
+    print(f"   Per-compound accuracy: {results['per_compound_accuracy']:.3f} ± {results['per_compound_std']:.3f}")
 
     return results
 

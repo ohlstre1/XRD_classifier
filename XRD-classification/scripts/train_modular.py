@@ -232,33 +232,33 @@ def train_model(model: nn.Module,
         print(f"\nEpoch {epoch}/{config['training']['epochs']}")
         print("-" * 30)
 
-        train_loss, _, _, train_batch_acc, train_class_acc = train_epoch(
+        train_loss, _, _, train_class_acc = train_epoch(
             model, train_loader, optimizer, device, epoch,
             train_ids=train_ids, compound_mapping=compound_mapping,
             compute_accuracy_every=5
         )
 
-        val_loss, val_batch_acc, val_class_acc = validate_epoch(
+        val_loss, val_class_acc = validate_epoch(
             model, val_loader, device, val_ids, compound_mapping
         )
 
         scheduler.step()
         current_lr = optimizer.param_groups[0]['lr']
 
-        print(f"Train Loss: {train_loss:.4f} | Batch Acc: {train_batch_acc:.3f}", end="")
+        # Batch accuracy is meaningless for prototypical learning with dynamic classes
+        # Only report meaningful metrics
+        print(f"Train Loss: {train_loss:.4f}", end="")
         if train_class_acc is not None:
-            print(f" | Class Acc: {train_class_acc:.3f}")
+            print(f" | Classification Acc: {train_class_acc:.3f}")
         else:
             print("")
-        print(f"Val Loss: {val_loss:.4f} | Batch Acc: {val_batch_acc:.3f} | Class Acc: {val_class_acc:.3f}")
+        print(f"Val Loss: {val_loss:.4f} | Classification Acc: {val_class_acc:.3f}")
         print(f"LR: {current_lr:.6f}")
 
         metrics = {
             'epoch': epoch,
             'train_loss': train_loss,
             'val_loss': val_loss,
-            'train_batch_accuracy': train_batch_acc,
-            'val_batch_accuracy': val_batch_acc,
             'train_classification_accuracy': train_class_acc,
             'val_classification_accuracy': val_class_acc,
             'learning_rate': current_lr
@@ -306,12 +306,10 @@ def main():
                         help='Path to config file')
     parser.add_argument('--epochs', type=int, help='Number of epochs (overrides config)')
     parser.add_argument('--batch_size', type=int, help='Batch size (overrides config)')
-    parser.add_argument('--n_samples', type=int, default=500, help='Total number of compounds to use')
+    parser.add_argument('--n_samples', type=int, default=-1, help='Number of compounds to use for debugging (-1 for all data)')
     parser.add_argument('--val_samples', type=int, help='Number of validation samples (deprecated, use ratios)')
     parser.add_argument('--test_samples', type=int, help='Number of test samples (deprecated, use ratios)')
-    parser.add_argument('--train_ratio', type=float, default=0.6, help='Ratio of samples for training (default: 0.6)')
-    parser.add_argument('--val_ratio', type=float, default=0.2, help='Ratio of samples for validation (default: 0.2)')
-    parser.add_argument('--test_ratio', type=float, default=0.2, help='Ratio of samples for testing (default: 0.2)')
+    # Removed ratio arguments as we always use all available data per split
     parser.add_argument('--lr', type=float, help='Learning rate (overrides config)')
     parser.add_argument('--embedding_dim', type=int, help='Embedding dimension (overrides config)')
     parser.add_argument('--wandb_project', type=str, default='xrd-classification',
@@ -341,38 +339,27 @@ def main():
     if args.embedding_dim is not None:
         config['model']['embedding_dim'] = args.embedding_dim
 
-    # Calculate sample splits based on ratios
-    # Normalize ratios if they don't sum to 1
-    total_ratio = args.train_ratio + args.val_ratio + args.test_ratio
-    train_ratio = args.train_ratio / total_ratio
-    val_ratio = args.val_ratio / total_ratio
-    test_ratio = args.test_ratio / total_ratio
+    # n_samples controls how many unique compounds to use (for debugging/testing)
+    # Each split uses ALL its available data, not subsets
+    n_compounds_to_use = args.n_samples  # This limits unique compounds, not total samples
 
-    # Calculate actual sample numbers for disjoint splits
-    total_compounds = min(args.n_samples, 2000)  # Limited by test set size
-    n_train = int(total_compounds * train_ratio)
-    n_val = int(total_compounds * val_ratio)
-    n_test = total_compounds - n_train - n_val  # Remainder goes to test
-
-    # For backward compatibility with old arguments
-    if args.val_samples is not None or args.test_samples is not None:
-        print("Warning: --val_samples and --test_samples are deprecated. Use --train_ratio, --val_ratio, --test_ratio instead.")
-        val_samples = args.val_samples if args.val_samples is not None else n_val
-        test_samples = args.test_samples if args.test_samples is not None else n_test
-    else:
-        val_samples = n_val
-        test_samples = n_test
+    # These variables are kept for compatibility but won't limit the actual data loaded
+    # We'll load ALL available data from each dataset
+    n_train = n_compounds_to_use  # Will load ALL synthetic data (13k+)
+    val_samples = n_compounds_to_use  # Will load ALL validation data (~9k)
+    test_samples = n_compounds_to_use  # Will load ALL test data (~3k)
 
     print("=" * 80)
-    print(f"XRD Prototypical Classification - {total_compounds} Total Compounds")
+    print(f"XRD Synthetic-to-Real Transfer Learning")
     print("=" * 80)
     print(f"Configuration:")
     print(f"  Config file: {config_path}")
-    print(f"  Total compounds: {total_compounds}")
-    print(f"  Split ratios: {train_ratio:.1%} / {val_ratio:.1%} / {test_ratio:.1%}")
-    print(f"  Train compounds: {n_train} (indices 0-{n_train-1})")
-    print(f"  Val compounds: {val_samples} (indices {n_train}-{n_train+val_samples-1})")
-    print(f"  Test compounds: {test_samples} (indices {n_train+val_samples}-{n_train+val_samples+test_samples-1})")
+    print(f"  Compound limit: {n_compounds_to_use} (for debugging, -1 for all)")
+    print(f"  Data loading:")
+    print(f"    Train: ALL synthetic data (~13k compounds)")
+    print(f"    Val: ALL validation data (~9k compounds)")
+    print(f"    Test: ALL test data (~3k compounds)")
+    print(f"  Note: Same compounds appear in train (synthetic) and val/test (real)")
     print(f"  Epochs: {config['training']['epochs']}")
     print(f"  Batch size: {config['training']['batch_size']}")
     print(f"  Learning rate: {config['training']['learning_rate']}")
@@ -398,39 +385,52 @@ def main():
     print("LOADING DATASETS")
     print(f"{'='*50}")
 
-    # Create disjoint indices for train/val/test splits
-    if total_compounds < 13325:  # Need to subset the data
-        train_indices = list(range(0, n_train))
-        val_indices = list(range(n_train, n_train + val_samples))
-        test_indices = list(range(n_train + val_samples, n_train + val_samples + test_samples))
+    # Always load ALL available data from each dataset
+    # n_compounds_to_use only limits the number of unique compounds for debugging
 
-        print(f"Using disjoint compound splits:")
-        print(f"  Train: compounds {train_indices[0]}-{train_indices[-1]}")
-        print(f"  Val: compounds {val_indices[0]}-{val_indices[-1]}")
-        print(f"  Test: compounds {test_indices[0]}-{test_indices[-1]}")
+    if n_compounds_to_use > 0 and n_compounds_to_use < 13325:
+        # Limited compounds for debugging/testing
+        print(f"Debug mode: Limiting to {n_compounds_to_use} compounds")
+        # Use first n_compounds_to_use compounds (same compounds across all splits)
+        compound_indices = list(range(n_compounds_to_use))
 
-        # Load synthetic training data with specific indices
-        train_data = load_subset_data(synthetic_train_path, n_samples=n_train, indices=train_indices)
-
-        # Apply duplication to synthetic training data if configured
+        # Load subsets with same compound indices
+        train_data = load_subset_data(synthetic_train_path, n_samples=n_compounds_to_use, indices=compound_indices)
         train_data = duplicate_patterns(train_data, config)
+        val_data = load_real_val_data(real_val_path, indices=compound_indices)
+        test_data = load_real_test_data(real_test_path, indices=compound_indices)
 
-        # Load real validation and test data with disjoint indices
-        val_data = load_real_val_data(real_val_path, indices=val_indices)
-        test_data = load_real_test_data(real_test_path, indices=test_indices)
-
-        use_disjoint = True
+        print(f"  Loaded {n_compounds_to_use} compounds from each dataset")
     else:
-        # Use all available data
+        # Use ALL available data (normal mode)
+        print(f"Loading ALL available data from each dataset")
         train_data = load_synthetic_data(synthetic_train_path)
         train_data = duplicate_patterns(train_data, config)
         val_data = load_real_val_data(real_val_path)
         test_data = load_real_test_data(real_test_path)
-        use_disjoint = False
 
-    # Create split information - don't use common compounds for disjoint splits
-    split_info = create_synthetic_real_split(train_data, val_data, test_data,
-                                            use_common_compounds=False)  # Each split has different compounds
+        print(f"  Train: {len(train_data['synth_xrd'])} synthetic patterns")
+        print(f"  Val: {len(val_data['real_xrd'])} real patterns")
+        print(f"  Test: {len(test_data['real_xrd'])} real patterns")
+
+    # Create split information for synthetic-to-real transfer learning
+    # use_common_compounds=True because we're testing if synthetic patterns
+    # can identify real patterns of the SAME compounds
+    if n_compounds_to_use > 0 and n_compounds_to_use < 13325:
+        # Limited compounds - use the same indices for all
+        split_info = create_synthetic_real_split(
+            train_data, val_data, test_data,
+            use_common_compounds=True,  # Same compounds, different domains
+            train_indices=compound_indices,
+            val_indices=compound_indices,
+            test_indices=compound_indices
+        )
+    else:
+        # Full data - compounds naturally overlap
+        split_info = create_synthetic_real_split(
+            train_data, val_data, test_data,
+            use_common_compounds=True  # Same compounds, different domains
+        )
     train_ids = split_info['train']
     val_ids = split_info['val']
     test_ids = split_info['test']

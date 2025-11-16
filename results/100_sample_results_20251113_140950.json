@@ -1,0 +1,55 @@
+{
+  "configuration": {
+    "n_samples": 100,
+    "epochs": 1,
+    "batch_size": 32,
+    "learning_rate": 5e-06,
+    "embedding_dim": 1024,
+    "augmentations_per_sample": 5,
+    "classical_enabled": false,
+    "diffusion_enabled": true
+  },
+  "data_split": {
+    "train_compounds": 80,
+    "val_compounds": 20,
+    "train_samples": 400,
+    "val_samples": 100
+  },
+  "training": {
+    "best_val_classification_accuracy": 0.05,
+    "best_epoch": 1,
+    "training_time_seconds": 4.30327296257019
+  },
+  "evaluation": {
+    "top1_accuracy": 0.05,
+    "top5_accuracy": 0.25,
+    "total_samples": 20,
+    "correct_top1": 1,
+    "correct_top5": 5
+  },
+  "model_info": {
+    "model_type": "XRDPrototypicalClassifier",
+    "backbone": "ResNet1D-18",
+    "embedding_dim": 1024,
+    "loss_type": "prototypical_triplet",
+    "temperature": 0.3,
+    "total_parameters": 4371264,
+    "trainable_parameters": 4371264,
+    "training_step": 13,
+    "proto_weight": 1.0,
+    "triplet_weight": 0.5,
+    "triplet_margin": 0.2
+  },
+  "training_history": [
+    {
+      "epoch": 1,
+      "train_loss": 6.867005494924692,
+      "val_loss": 1.5724905729293823,
+      "train_batch_accuracy": 0.0,
+      "val_batch_accuracy": 0.046875,
+      "train_classification_accuracy": null,
+      "val_classification_accuracy": 0.05,
+      "learning_rate": 5e-07
+    }
+  ]
+}

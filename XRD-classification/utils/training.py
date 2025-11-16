@@ -16,7 +16,7 @@ def train_epoch(model: nn.Module,
                 epoch: int,
                 train_ids: Optional[List[str]] = None,
                 compound_mapping: Optional[Dict] = None,
-                compute_accuracy_every: int = 5) -> Tuple[float, float, float, float, Optional[float]]:
+                compute_accuracy_every: int = 5) -> Tuple[float, float, float, Optional[float]]:
     """
     Train for one epoch.
 
@@ -31,14 +31,13 @@ def train_epoch(model: nn.Module,
         compute_accuracy_every: Compute classification accuracy every N epochs
 
     Returns:
-        Tuple of (avg_loss, avg_proto_loss, avg_triplet_loss, avg_batch_accuracy, classification_accuracy)
+        Tuple of (avg_loss, avg_proto_loss, avg_triplet_loss, classification_accuracy)
     """
     model.train()
 
     total_loss = 0
     total_proto_loss = 0
     total_triplet_loss = 0
-    total_batch_accuracy = 0
     classification_accuracy = None
 
     pbar = tqdm(train_loader, desc=f'Epoch {epoch}')
@@ -57,12 +56,9 @@ def train_epoch(model: nn.Module,
         total_loss += loss.item()
         total_proto_loss += metrics.get('proto_loss_component', loss).item()
         total_triplet_loss += metrics.get('triplet_loss_component', torch.tensor(0.0)).item()
-        proto_accuracy = metrics.get('proto_accuracy', 0.0)
-        total_batch_accuracy += proto_accuracy.item() if hasattr(proto_accuracy, 'item') else proto_accuracy
 
         pbar.set_postfix({
-            'loss': f'{loss.item():.4f}',
-            'batch_acc': f'{proto_accuracy.item() if hasattr(proto_accuracy, "item") else proto_accuracy:.3f}'
+            'loss': f'{loss.item():.4f}'
         })
 
         model.update_training_state()
@@ -70,7 +66,6 @@ def train_epoch(model: nn.Module,
     avg_loss = total_loss / len(train_loader)
     avg_proto_loss = total_proto_loss / len(train_loader)
     avg_triplet_loss = total_triplet_loss / len(train_loader)
-    avg_batch_accuracy = total_batch_accuracy / len(train_loader)
 
     if epoch % compute_accuracy_every == 0 and train_ids is not None and compound_mapping is not None:
         print("\n  Computing training classification accuracy...")
@@ -84,14 +79,14 @@ def train_epoch(model: nn.Module,
         model.train()
         print(f"  Training classification accuracy: {classification_accuracy:.3f}")
 
-    return avg_loss, avg_proto_loss, avg_triplet_loss, avg_batch_accuracy, classification_accuracy
+    return avg_loss, avg_proto_loss, avg_triplet_loss, classification_accuracy
 
 
 def validate_epoch(model: nn.Module,
                    val_loader: torch.utils.data.DataLoader,
                    device: torch.device,
                    val_ids: List[str],
-                   compound_mapping: Dict) -> Tuple[float, float, float]:
+                   compound_mapping: Dict) -> Tuple[float, float]:
     """
     Validate for one epoch using proper classification accuracy.
 
@@ -103,12 +98,11 @@ def validate_epoch(model: nn.Module,
         compound_mapping: Mapping of compound IDs to metadata
 
     Returns:
-        Tuple of (avg_loss, avg_batch_accuracy, classification_accuracy)
+        Tuple of (avg_loss, classification_accuracy)
     """
     model.eval()
 
     total_loss = 0
-    total_batch_accuracy = 0
 
     with torch.no_grad():
         for xrd_patterns, _, compound_ids in tqdm(val_loader, desc='Validation'):
@@ -118,11 +112,8 @@ def validate_epoch(model: nn.Module,
             _, loss, metrics = model(xrd_patterns, labels)
 
             total_loss += loss.item()
-            proto_accuracy = metrics.get('proto_accuracy', 0.0)
-            total_batch_accuracy += proto_accuracy.item() if hasattr(proto_accuracy, 'item') else proto_accuracy
 
     avg_loss = total_loss / len(val_loader)
-    avg_batch_accuracy = total_batch_accuracy / len(val_loader)
 
     from .evaluation import compute_classification_accuracy
     val_acc_metrics = compute_classification_accuracy(
@@ -130,7 +121,7 @@ def validate_epoch(model: nn.Module,
     )
     classification_accuracy = val_acc_metrics['top1_accuracy']
 
-    return avg_loss, avg_batch_accuracy, classification_accuracy
+    return avg_loss, classification_accuracy
 
 
 class TrainingTracker:
