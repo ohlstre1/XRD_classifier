@@ -13,7 +13,6 @@ Usage:
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import numpy as np
 import json
 import yaml
 import os
@@ -21,7 +20,6 @@ import sys
 import argparse
 import time
 from datetime import datetime
-from pathlib import Path
 import warnings
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -32,18 +30,16 @@ from utils.augmentation import DualXRDAugmenter
 from utils.data_loading import (
     load_subset_data,
     duplicate_patterns,
-    create_subset_mapping,
-    create_subset_split,
     load_synthetic_data,
     load_real_val_data,
     load_real_test_data,
     create_synthetic_real_split,
     create_combined_mapping
 )
-from utils.datasets import XRDDuplicatedDataset, XRDSyntheticTrainDataset, XRDRealEvalDataset
+from utils.datasets import XRDSyntheticTrainDataset, XRDRealEvalDataset
 from utils.training import train_epoch, validate_epoch, TrainingTracker
-from utils.evaluation import evaluate_on_real_patterns, evaluate_cross_set
-from utils.prototypes import compute_prototypes, PrototypeBank
+from utils.evaluation import evaluate_cross_set
+from utils.prototypes import compute_prototypes
 
 from torch.utils.data import DataLoader
 
@@ -114,9 +110,13 @@ def setup_wandb(config: dict, args: argparse.Namespace, val_samples: int = None,
                 'learning_rate': config['training']['learning_rate'],
                 'embedding_dim': config['model']['embedding_dim'],
                 'temperature': config['model']['temperature'],
-                'proto_weight': config['model']['proto_weight'],
-                'triplet_weight': config['model']['triplet_weight'],
-                'triplet_margin': config['model']['triplet_margin'],
+                'loss_type': config['model'].get('loss_type', 'prototypical_triplet'),
+                'proto_weight': config['model'].get('proto_weight'),
+                'triplet_weight': config['model'].get('triplet_weight'),
+                'triplet_margin': config['model'].get('triplet_margin'),
+                'arcface_margin': config['model'].get('arcface_margin'),
+                'arcface_scale': config['model'].get('arcface_scale'),
+                'supcon_temperature': config['model'].get('supcon_temperature'),
                 'augmentations_per_sample': config['augmentation']['n_augmentations'],
                 'classical_enabled': config['augmentation']['classical']['enabled'],
                 'diffusion_enabled': config['augmentation']['diffusion']['enabled']
@@ -191,7 +191,8 @@ def train_model(model: nn.Module,
                 train_ids: list,
                 val_ids: list,
                 compound_mapping: dict,
-                use_wandb: bool) -> TrainingTracker:
+                use_wandb: bool,
+                loss_type: str = 'prototypical_triplet') -> TrainingTracker:
     """
     Train the model.
 
@@ -205,6 +206,7 @@ def train_model(model: nn.Module,
         val_ids: Validation compound IDs
         compound_mapping: Compound mapping
         use_wandb: Whether to log to wandb
+        loss_type: Type of loss being used
 
     Returns:
         TrainingTracker with training history
@@ -232,7 +234,7 @@ def train_model(model: nn.Module,
         print(f"\nEpoch {epoch}/{config['training']['epochs']}")
         print("-" * 30)
 
-        train_loss, _, _, train_class_acc = train_epoch(
+        train_loss, component_loss, triplet_loss, train_class_acc = train_epoch(
             model, train_loader, optimizer, device, epoch,
             train_ids=train_ids, compound_mapping=compound_mapping,
             compute_accuracy_every=5
@@ -263,6 +265,16 @@ def train_model(model: nn.Module,
             'val_classification_accuracy': val_class_acc,
             'learning_rate': current_lr
         }
+
+        # Add loss-specific metrics based on loss type
+        if loss_type == 'prototypical_triplet':
+            if component_loss is not None:
+                metrics['train_proto_loss'] = component_loss
+            if triplet_loss is not None:
+                metrics['train_triplet_loss'] = triplet_loss
+        elif loss_type == 'arcface_supcon':
+            if component_loss is not None:
+                metrics['train_scl_loss'] = component_loss
 
         if use_wandb:
             wandb.log(metrics)
@@ -345,7 +357,6 @@ def main():
 
     # These variables are kept for compatibility but won't limit the actual data loaded
     # We'll load ALL available data from each dataset
-    n_train = n_compounds_to_use  # Will load ALL synthetic data (13k+)
     val_samples = n_compounds_to_use  # Will load ALL validation data (~9k)
     test_samples = n_compounds_to_use  # Will load ALL test data (~3k)
 
@@ -452,20 +463,41 @@ def main():
         config, train_data, val_data, train_ids, val_ids, augmenter
     )
 
-    model = XRDPrototypicalClassifier(
-        embedding_dim=config['model']['embedding_dim'],
-        loss_type='prototypical_triplet',
-        temperature=config['model']['temperature'],
-        proto_weight=config['model']['proto_weight'],
-        triplet_weight=config['model']['triplet_weight'],
-        triplet_margin=config['model']['triplet_margin']
-    ).to(device)
+    # Get loss type from config
+    loss_type = config['model'].get('loss_type', 'prototypical_triplet')
+
+    # Prepare model kwargs based on loss type
+    model_kwargs = {
+        'embedding_dim': config['model']['embedding_dim'],
+        'loss_type': loss_type,
+        'temperature': config['model']['temperature'],
+    }
+
+    # Add loss-specific parameters
+    if loss_type == 'prototypical_triplet':
+        model_kwargs.update({
+            'proto_weight': config['model']['proto_weight'],
+            'triplet_weight': config['model']['triplet_weight'],
+            'triplet_margin': config['model']['triplet_margin']
+        })
+    elif loss_type == 'arcface_supcon':
+        # For ArcFace + SupCon, we need the number of classes
+        num_classes = len(train_ids)  # Number of unique compounds in training set
+        model_kwargs.update({
+            'num_classes': num_classes,
+            'arcface_margin': config['model'].get('arcface_margin', 0.5),
+            'arcface_scale': config['model'].get('arcface_scale', 30.0),
+            'arcface_easy_margin': config['model'].get('arcface_easy_margin', False),
+            'supcon_temperature': config['model'].get('supcon_temperature', 0.07)
+        })
+
+    model = XRDPrototypicalClassifier(**model_kwargs).to(device)
 
     print(f"✅ Model initialized: {model.get_model_info()}")
 
     tracker, training_time = train_model(
         model, train_loader, val_loader, config, device,
-        train_ids, val_ids, compound_mapping, use_wandb
+        train_ids, val_ids, compound_mapping, use_wandb, loss_type
     )
 
     print(f"\n{'='*50}")

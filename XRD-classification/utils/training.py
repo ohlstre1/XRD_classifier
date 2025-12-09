@@ -31,13 +31,15 @@ def train_epoch(model: nn.Module,
         compute_accuracy_every: Compute classification accuracy every N epochs
 
     Returns:
-        Tuple of (avg_loss, avg_proto_loss, avg_triplet_loss, classification_accuracy)
+        Tuple of (avg_loss, avg_proto_loss, avg_triplet_loss, classification_accuracy) for prototypical_triplet
+        Tuple of (avg_loss, avg_scl_loss, None, classification_accuracy) for arcface_supcon
     """
     model.train()
 
     total_loss = 0
     total_proto_loss = 0
     total_triplet_loss = 0
+    total_scl_loss = 0  # For supervised contrastive loss
     classification_accuracy = None
 
     pbar = tqdm(train_loader, desc=f'Epoch {epoch}')
@@ -54,8 +56,14 @@ def train_epoch(model: nn.Module,
         optimizer.step()
 
         total_loss += loss.item()
-        total_proto_loss += metrics.get('proto_loss_component', loss).item()
-        total_triplet_loss += metrics.get('triplet_loss_component', torch.tensor(0.0)).item()
+
+        # Handle different loss types
+        if 'proto_loss_component' in metrics:
+            total_proto_loss += metrics['proto_loss_component'].item()
+        if 'triplet_loss_component' in metrics:
+            total_triplet_loss += metrics['triplet_loss_component'].item()
+        if 'scl_loss' in metrics:
+            total_scl_loss += metrics['scl_loss'].item()
 
         pbar.set_postfix({
             'loss': f'{loss.item():.4f}'
@@ -64,8 +72,9 @@ def train_epoch(model: nn.Module,
         model.update_training_state()
 
     avg_loss = total_loss / len(train_loader)
-    avg_proto_loss = total_proto_loss / len(train_loader)
-    avg_triplet_loss = total_triplet_loss / len(train_loader)
+    avg_proto_loss = total_proto_loss / len(train_loader) if total_proto_loss > 0 else None
+    avg_triplet_loss = total_triplet_loss / len(train_loader) if total_triplet_loss > 0 else None
+    avg_scl_loss = total_scl_loss / len(train_loader) if total_scl_loss > 0 else None
 
     if epoch % compute_accuracy_every == 0 and train_ids is not None and compound_mapping is not None:
         print("\n  Computing training classification accuracy...")
@@ -79,7 +88,13 @@ def train_epoch(model: nn.Module,
         model.train()
         print(f"  Training classification accuracy: {classification_accuracy:.3f}")
 
-    return avg_loss, avg_proto_loss, avg_triplet_loss, classification_accuracy
+    # Return appropriate values based on loss type
+    if avg_scl_loss is not None:
+        # ArcFace + SupCon case: return scl_loss as second component
+        return avg_loss, avg_scl_loss, None, classification_accuracy
+    else:
+        # Prototypical + Triplet case: return original format
+        return avg_loss, avg_proto_loss, avg_triplet_loss, classification_accuracy
 
 
 def validate_epoch(model: nn.Module,

@@ -595,7 +595,7 @@ if __name__ == "__main__":
                         help='Number of epochs to train')
     parser.add_argument('--lr', type=float, default=0.001,
                         help='Learning rate')
-    parser.add_argument('--sample-limit', type=int, default=1000,
+    parser.add_argument('--sample-limit', type=int, default=10000,
                         help='Limit number of samples from dataset (None to use all)')
     parser.add_argument('--num-classes', type=int, default=None,
                         help='Number of classes (default: same as sample-limit)')
@@ -619,7 +619,7 @@ if __name__ == "__main__":
         name=args.wandb_name,
         config={
             "architecture": "XRDClassifier-1DCNN",
-            "dataset_path": "data/xrd_dataset_labeled_dtw_window.pt",
+            "dataset_path": "../data/xrd_dataset_labeled_dtw_window.pt",
             "epochs": args.epochs,
             "batch_size": args.batch_size,
             "learning_rate": args.lr,

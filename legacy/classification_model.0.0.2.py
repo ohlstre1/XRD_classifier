@@ -592,7 +592,7 @@ if __name__ == "__main__":
         name=args.wandb_name,
         config={
             "architecture": "XRDClassifier-1DCNN",
-            "dataset_path": "data/xrd_dataset_labeled_dtw_window.pt",
+            "dataset_path": "../data/xrd_dataset_labeled_dtw_window.pt",
             "epochs": args.epochs,
             "batch_size": args.batch_size,
             "learning_rate": args.lr,

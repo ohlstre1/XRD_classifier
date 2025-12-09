@@ -19,6 +19,8 @@ from .prototypical_loss import (
     PrototypicalWithTripletLoss,
     AdaptivePrototypicalLoss
 )
+from .arcface_head import ArcFaceHead, ArcFaceLoss
+from .contrastive_loss import SupervisedContrastiveLoss, MultiViewContrastiveLoss, HierarchicalContrastiveLoss
 from .xrd_classifier import XRDPrototypicalClassifier
 
 __all__ = [
@@ -33,6 +35,15 @@ __all__ = [
     'HardTripletLoss',
     'PrototypicalWithTripletLoss',
     'AdaptivePrototypicalLoss',
+
+    # ArcFace components
+    'ArcFaceHead',
+    'ArcFaceLoss',
+
+    # Contrastive loss functions
+    'SupervisedContrastiveLoss',
+    'MultiViewContrastiveLoss',
+    'HierarchicalContrastiveLoss',
 
     # Main classifier
     'XRDPrototypicalClassifier'

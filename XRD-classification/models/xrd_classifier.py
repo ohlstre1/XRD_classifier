@@ -28,6 +28,8 @@ try:
         PrototypicalWithTripletLoss,
         AdaptivePrototypicalLoss
     )
+    from .arcface_head import ArcFaceHead
+    from .contrastive_loss import SupervisedContrastiveLoss
 except ImportError:
     # For standalone testing
     from resnet1d import ResNet1D, create_resnet1d_18
@@ -36,6 +38,8 @@ except ImportError:
         PrototypicalWithTripletLoss,
         AdaptivePrototypicalLoss
     )
+    from arcface_head import ArcFaceHead
+    from contrastive_loss import SupervisedContrastiveLoss
 
 
 class XRDPrototypicalClassifier(nn.Module):
@@ -49,7 +53,7 @@ class XRDPrototypicalClassifier(nn.Module):
 
     Args:
         embedding_dim: Dimension of output embeddings
-        loss_type: Type of loss function ('prototypical', 'prototypical_triplet', 'adaptive')
+        loss_type: Type of loss function ('prototypical', 'prototypical_triplet', 'adaptive', 'arcface_supcon')
         temperature: Temperature for prototypical loss
         **loss_kwargs: Additional arguments for loss function
     """
@@ -73,6 +77,22 @@ class XRDPrototypicalClassifier(nn.Module):
 
         # Initialize backbone
         self.backbone = create_resnet1d_18(embedding_dim=embedding_dim)
+
+        # For ArcFace + SupCon, initialize additional components
+        self.arcface_head = None
+        if loss_type == 'arcface_supcon':
+            # We'll need to know the number of classes, passed via loss_kwargs
+            num_classes = loss_kwargs.get('num_classes', None)
+            if num_classes is None:
+                raise ValueError("num_classes must be provided for arcface_supcon loss type")
+
+            self.arcface_head = ArcFaceHead(
+                embedding_dim=embedding_dim,
+                num_classes=num_classes,
+                margin=loss_kwargs.get('arcface_margin', 0.5),
+                scale=loss_kwargs.get('arcface_scale', 30.0),
+                easy_margin=loss_kwargs.get('arcface_easy_margin', False)
+            )
 
         # Initialize loss function
         self.criterion = self._create_loss_function(loss_type, temperature, **loss_kwargs)
@@ -117,6 +137,10 @@ class XRDPrototypicalClassifier(nn.Module):
                 final_temperature=final_temp,
                 adaptation_rate=adaptation_rate
             )
+
+        elif loss_type == 'arcface_supcon':
+            supcon_temperature = kwargs.get('supcon_temperature', 0.07)
+            return SupervisedContrastiveLoss(temperature=supcon_temperature)
 
         else:
             raise ValueError(f"Unknown loss type: {loss_type}")
@@ -164,6 +188,12 @@ class XRDPrototypicalClassifier(nn.Module):
             metrics['proto_loss_component'] = proto_loss.detach()
             metrics['triplet_loss_component'] = triplet_loss.detach()
             return total_loss, metrics
+
+        elif self.loss_type == 'arcface_supcon':
+            # For ArcFace + SupCon, we use contrastive loss during training
+            # and can optionally use ArcFace head for inference/evaluation
+            loss, metrics = self.criterion(embeddings, labels)
+            return loss, metrics
 
         else:
             loss, metrics = self.criterion(embeddings, labels)
@@ -267,6 +297,12 @@ class XRDPrototypicalClassifier(nn.Module):
             info['proto_weight'] = self.criterion.proto_weight
             info['triplet_weight'] = self.criterion.triplet_weight
             info['triplet_margin'] = self.criterion.triplet_loss.margin
+
+        if self.loss_type == 'arcface_supcon' and self.arcface_head is not None:
+            info['arcface_num_classes'] = self.arcface_head.num_classes
+            info['arcface_margin'] = self.arcface_head.margin
+            info['arcface_scale'] = self.arcface_head.scale
+            info['supcon_temperature'] = self.criterion.temperature
 
         return info
 
