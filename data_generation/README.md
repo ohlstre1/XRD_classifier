@@ -2,40 +2,83 @@
 
 This directory contains all scripts and documentation needed to generate the XRD pattern datasets used in this project.
 
-## Overview
+## Data Organization
 
-The datasets in `xrd_patterns_final/` were generated from three primary sources:
-- **COD** (Crystallography Open Database) - Large database of crystal structures
-- **RRUFF** - Mineral database with measured XRD patterns
-- **AMS** (American Mineralogist Structure Database) - Mineral crystal structures with measured diffraction data
+Datasets are organized by source in `data/`:
+
+```
+data_generation/
+├── data/
+│   ├── COD/                       ← Open license, redistributable
+│   │   ├── COD_xrd_patterns_*.pt
+│   │   └── README.md
+│   │
+│   ├── AMCSD/                     ← Restricted (requires MSA permission)
+│   │   ├── xrd_dataset*.pt
+│   │   └── README.md
+│   │
+│   ├── RRUFF/                     ← Research/educational use
+│   │   ├── RRUFF_xrd_dataset_normalized.pt
+│   │   └── README.md
+│   │
+│   ├── matching_compositions.csv  ← RRUFF↔COD ID mappings
+│   └── matching_compositions.json
+│
+├── scripts/                       ← Data generation scripts
+└── README.md                      ← This file
+```
+
+## Data Sources Summary
+
+| Source | Size | License | Redistributable? |
+|--------|------|---------|------------------|
+| **COD** | ~10.7 GB | Open | Yes |
+| **AMCSD** | ~1.4 GB | MSA/MAC | Needs permission |
+| **RRUFF** | ~24 MB | Research use | Verify terms |
+
+### COD (Crystallography Open Database)
+- **Contents:** Synthetic XRD patterns calculated from CIF structures
+- **License:** Open, freely redistributable
+- **Source:** https://www.crystallography.net/cod/
+
+### AMCSD (American Mineralogist Crystal Structure Database)
+- **Contents:** Paired synthetic + measured XRD patterns
+- **License:** Requires MSA/MAC permission to redistribute
+- **Source:** http://rruff.geo.arizona.edu/AMS/amcsd.php
+- **Note:** See `data/AMCSD/README.md` for regeneration instructions
+
+### RRUFF
+- **Contents:** Measured experimental XRD patterns
+- **License:** Research/educational use
+- **Source:** https://rruff.info/
 
 ## Dataset Inventory
 
-### COD Datasets (`xrd_patterns_final/`)
+### COD Datasets (`data/COD/`)
 
 | File | Size | Description |
 |------|------|-------------|
-| `COD_xrd_patterns_and_ID.pt` | 7.8 GB | Full dataset with compound IDs |
-| `COD_xrd_patterns_100000.pt` | 1.8 GB | 100,000 sample subset |
-| `COD_xrd_patterns_50000.pt` | 901 MB | 50,000 sample subset |
-| `COD_xrd_patterns_10000.pt` | 180 MB | 10,000 sample subset |
+| `COD_xrd_patterns_and_ID.pt` | 7.4 GB | Full dataset with compound IDs |
+| `COD_xrd_patterns_100000.pt` | 1.7 GB | 100,000 sample subset |
+| `COD_xrd_patterns_50000.pt` | 860 MB | 50,000 sample subset |
+| `COD_xrd_patterns_10000.pt` | 172 MB | 10,000 sample subset |
 | `COD_xrd_patterns_1000.pt` | 18 MB | 1,000 sample subset |
 
-### RRUFF Dataset (`xrd_patterns_final/`)
+### AMCSD Datasets (`data/AMCSD/`)
+
+| File | Size | Description |
+|------|------|-------------|
+| `xrd_dataset_labeled_dtw_window.pt` | 459 MB | Patterns with DTW distance labels |
+| `xrd_dataset_labeled_fastdw.pt` | 459 MB | Patterns with FastDTW labels |
+| `xrd_dataset_large.pt` | 459 MB | Large pattern dataset |
+| `xrd_dataset.pt` | 13 MB | Standard dataset |
+| `xrd_dataset_dev.pt` | 1.1 MB | Development subset |
+
+### RRUFF Dataset (`data/RRUFF/`)
 
 | File | Size | Description |
 |------|------|-------------|
 | `RRUFF_xrd_dataset_normalized.pt` | 24 MB | Normalized RRUFF mineral patterns |
-
-### AMS Datasets (`xrd_patterns_final/xrd_ams_patterns/`)
-
-| File | Size | Description |
-|------|------|-------------|
-| `xrd_dataset_labeled_dtw_window.pt` | 480 MB | Patterns with DTW distance labels |
-| `xrd_dataset_labeled_fastdw.pt` | 480 MB | Patterns with FastDTW labels |
-| `xrd_dataset_large.pt` | 480 MB | Large pattern dataset |
-| `xrd_dataset.pt` | 13 MB | Standard dataset |
-| `xrd_dataset_dev.pt` | 1 MB | Development subset |
 
 ## Data Pipeline
 
@@ -122,19 +165,6 @@ python scripts/xrd_generator.py
 # Edit the script to set src_folder and output_path
 ```
 
-**Example (in Python):**
-```python
-from scripts.xrd_generator import process_and_save_torch
-
-process_and_save_torch(
-    src_folder="path/to/cif_and_diffraction_files",
-    output_path="xrd_dataset.pt",
-    num_points=4500,
-    max_angle=90.0,
-    wavelength=1.54184
-)
-```
-
 ### 3. `scripts/xrd_peak_generator.py`
 Simpler script that generates XRD patterns from CIF files only (no measured data).
 
@@ -144,18 +174,12 @@ Simpler script that generates XRD patterns from CIF files only (no measured data
 **Output:**
 - `.pt` file with list of (peak_params, index, filename) tuples
 
-**Usage:**
-```bash
-python scripts/xrd_peak_generator.py
-```
-
 ### 4. `scripts/generate_xy_data.py`
 Generates fully synthetic XRD-like data for testing/development.
 
 **Usage:**
 ```bash
 python scripts/generate_xy_data.py <num_files>
-# Example: python scripts/generate_xy_data.py 1000
 ```
 
 ### 5. `scripts/prepare_data.py`
@@ -172,39 +196,37 @@ Preprocesses raw XRD datasets for model training.
 **Usage:**
 ```bash
 python scripts/prepare_data.py \
-    --dataset_path ../xrd_patterns_final/xrd_ams_patterns/xrd_dataset_labeled_dtw_window.pt \
+    --dataset_path data/AMCSD/xrd_dataset_labeled_dtw_window.pt \
     --output_dir processed/ \
     --stratify_by_dtw
 ```
 
 ## How to Regenerate Datasets
 
-### Step 1: Install Dependencies
+### COD Data (Automated)
+
 ```bash
+# 1. Install dependencies
 pip install -r requirements.txt
-```
 
-### Step 2: Download CIF Files (for COD datasets)
-```bash
-# Edit data/matching_compositions.csv with desired COD IDs
+# 2. Download CIF files from COD
 python scripts/cod_scraper.py
-```
 
-### Step 3: Generate XRD Patterns
-```bash
-# For paired CIF + measured diffraction data:
-python scripts/xrd_generator.py
-
-# For CIF-only synthetic patterns:
+# 3. Generate XRD patterns
 python scripts/xrd_peak_generator.py
 ```
 
-### Step 4: Prepare for Training
-```bash
-python scripts/prepare_data.py \
-    --dataset_path <path_to_raw_dataset.pt> \
-    --output_dir processed/
-```
+### AMCSD Data (Manual Download Required)
+
+See `data/AMCSD/README.md` for detailed instructions. Summary:
+
+1. Download CIF + diffraction files from http://rruff.geo.arizona.edu/AMS/amcsd.php
+2. Run `python scripts/xrd_generator.py`
+3. Run `python scripts/prepare_data.py`
+
+### RRUFF Data (Manual)
+
+See `data/RRUFF/README.md` for instructions.
 
 ## Data Format Details
 
@@ -245,28 +267,20 @@ python scripts/prepare_data.py \
 }
 ```
 
-## Missing Scripts / Manual Steps
+## Publishing Guide
 
-### AMS Data Acquisition (NOT AUTOMATED)
+### What You CAN Publish (Open)
+- `data/COD/` - All COD .pt files (open license)
+- `scripts/` - All preprocessing scripts (your code)
+- `data/matching_compositions.csv` - RRUFF↔COD mapping
 
-The AMS (American Mineralogist Structure Database) data was obtained manually. There is **no scraper script** for AMS in this repository.
+### What Requires Permission
+- `data/AMCSD/` - Needs MSA/MAC approval before redistribution
 
-**To obtain AMS data:**
-1. Visit the American Mineralogist Crystal Structure Database: http://rruff.geo.arizona.edu/AMS/amcsd.php
-2. Manually download CIF files and their corresponding measured diffraction files
-3. Name files in pairs:
-   - `<name>_cif.cif` - Crystal structure file
-   - `<name>_diffraction.txt` - Measured XRD data with "2-THETA" and "INTENSITY" columns
-4. Place all files in a single folder (e.g., `AMS_Downloads/`)
-5. Run `xrd_generator.py` pointing to that folder
-
-**TODO:** Create an `ams_scraper.py` script to automate this process.
-
-### RRUFF Data Acquisition (NOT AUTOMATED)
-
-Similarly, the RRUFF data (`RRUFF_xrd_dataset_normalized.pt`) was obtained through a process not captured in these scripts.
-
-**RRUFF Database:** https://rruff.info/
+### Recommended Approach
+1. Publish COD data and scripts freely
+2. For AMCSD, provide regeneration instructions (in `data/AMCSD/README.md`)
+3. Users can download from source and run your scripts
 
 ## Notes
 
