@@ -1,0 +1,94 @@
+\subsection{Classification with Augmented Training Data}
+
+\subsubsection{Motivation}
+
+When real measurement data is limited, synthetic patterns generated from crystal structure databases can bridge the gap.
+However, synthetic XRD patterns differ from laboratory measurements in peak shapes, background contributions, and noise characteristics.
+Two strategies are commonly used to address this discrepancy:
+
+\begin{itemize}
+    \item \textbf{Classical augmentation:} Manually specified transforms such as peak shifting, broadening, and intensity variation are applied to synthetic patterns. This requires prior knowledge of what differs between synthetic and real data and the magnitude of each effect.
+    \item \textbf{Diffusion-based augmentation:} A trained diffusion model (\ref{sec:diffusion-model}) learns the synthetic-to-real gap directly from paired data, without requiring the user to specify the nature or magnitude of the differences.
+\end{itemize}
+
+This section compares both approaches for mineral classification on the AMCSD dataset (Section~\ref{sec:dataset}).
+
+
+\subsubsection{Retrieval Baseline}
+
+As a reference point, we evaluate a training-free cosine-similarity retrieval approach.
+For each real query pattern, the method applies Gaussian smoothing ($\sigma{=}10$), followed by $L_2$ normalisation, and computes cosine similarity against all synthetic patterns in the database.
+The top-$k$ nearest synthetic patterns determine the predicted mineral class.
+
+Evaluated on all 13\,325 samples (not split into train/val/test, since no training is involved), retrieval achieves 92.17\% top-1, 99.41\% top-5, and 99.67\% top-10 accuracy.
+This establishes important context: a simple similarity search already achieves high accuracy, suggesting that the synthetic-to-real gap for the high-quality AMS data is modest for the majority of samples.
+
+
+\subsubsection{Experimental Design}
+
+All three trained classifiers share a common setup to ensure a fair comparison.
+The architecture is a 1D ResNet-18 (\ref{sec:resnet18}) with 5.8\,M parameters.
+Training uses the AdamW optimiser with a learning rate of $1 \times 10^{-4}$, weight decay of $1 \times 10^{-5}$, and cosine annealing learning rate scheduling.
+The loss function is cross-entropy, with a batch size of 32 and a fixed random seed of 42.
+
+The measured data is split 70/15/15 into training, validation, and test sets (9\,327 / 1\,998 / 2\,000 samples).
+All synthetic patterns are included in the training set alongside the measured training data.
+Table~\ref{tab:experiment-overview} summarises the three experiments.
+
+\begin{table}[htbp]
+\centering
+\caption{Overview of classification experiments.}
+\label{tab:experiment-overview}
+\begin{tabular}{lrrr}
+\toprule
+\textbf{Experiment} & \textbf{Synthetic} & \textbf{Train Total} & \textbf{Epochs} \\
+\midrule
+Baseline             & 13\,325 & 22\,652 & 200 \\
+Smart Classical Aug   & 33\,278 & 42\,605 & 120 \\
+Smart Diffusion Aug   & 33\,278 & 42\,605 & 100 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsubsection{Smart Classical Augmentation}
+
+Rather than augmenting all classes uniformly, a class-aware strategy targets only underrepresented classes.
+Classes with fewer than 10 measured samples are augmented; the remaining 259 classes (with $\geq$10 samples) are left unchanged.
+This results in 3\,703 of 3\,962 classes being augmented, with 3 variations generated per pattern, yielding 19\,953 additional synthetic samples.
+The total synthetic count increases from 13\,325 to 33\,278, and combined with the 9\,327 measured training samples, the training set reaches 42\,605 samples.
+
+Table~\ref{tab:classical-aug-params} lists the augmentation parameters.
+These transforms mimic common differences between simulated and measured XRD patterns: slight peak displacement from sample misalignment, broadening from finite crystallite size, and low-level background noise from the instrument.
+
+\begin{table}[htbp]
+\centering
+\caption{Classical augmentation parameters.}
+\label{tab:classical-aug-params}
+\begin{tabular}{lll}
+\toprule
+\textbf{Transform} & \textbf{Parameter} & \textbf{Value} \\
+\midrule
+Peak shifting       & Max shift (channels) & 3 \\
+Peak broadening     & Intensity range      & [0.05, 0.25] \\
+Intensity variation & Scale range          & [0.9, 1.1] \\
+Background noise    & Noise range          & [0.003, 0.01] \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The model is trained for 120 epochs with the same optimiser and scheduler as the baseline.
+
+
+\subsubsection{Smart Diffusion Augmentation}
+
+The diffusion-based augmentation uses the same class-aware strategy (threshold $< 10$), targeting the same 3\,703 classes and generating the same number of additional samples (19\,953), so the training set size is identical (42\,605).
+
+Instead of applying hand-crafted transforms, each synthetic pattern is passed through the trained diffusion model (\ref{sec:diffusion-model}).
+The forward diffusion process adds noise at low timesteps ($t \in [0, 30]$), and a one-step analytical denoising step (Equation~\ref{eq:denoise}) recovers the augmented pattern.
+A small input perturbation ($\sigma{=}0.03$) and DTW conditioning provide stochastic diversity across the 3 generated variations.
+
+The diffusion model achieves good reconstruction quality at $t{=}0$ (RMSE 0.0103, Pearson $r = 0.872$; Table~\ref{tab:quant-metrics}), suggesting that the learned mapping captures the synthetic-to-real transformation.
+The augmentation strategy relies on non-zero timesteps to introduce variation beyond a deterministic mapping.
+
+The model is trained for 100 epochs with early stopping (patience of 15 epochs).

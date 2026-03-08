@@ -1,0 +1,10 @@
+{
+  "n_samples": 13325,
+  "sigma": 10.0,
+  "top1_accuracy": 92.17260787992495,
+  "top5_accuracy": 99.40712945590994,
+  "top10_accuracy": 99.66979362101313,
+  "top1_correct": 12282,
+  "top5_correct": 13246,
+  "top10_correct": 13281
+}

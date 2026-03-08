@@ -1,0 +1,70 @@
+{
+  "config": {
+    "data_path": "../../data/xrd_dataset_labeled_dtw_window.pt",
+    "diffusion_model_path": "../../diffusion/models/xrd_diffusion/best_model.pth",
+    "num_variations": 3,
+    "aug_threshold": 10,
+    "diffusion_batch_size": 32,
+    "diffusion_max_t": 30,
+    "train_ratio": 0.7,
+    "val_ratio": 0.15,
+    "epochs": 2,
+    "batch_size": 32,
+    "lr": 0.0001,
+    "dropout": 0.3,
+    "n_samples": 700,
+    "save_dir": "./models/smart_diffusion_aug_v2_test",
+    "disable_wandb": true,
+    "seed": 42,
+    "resume": null,
+    "patience": 15
+  },
+  "augmentation": "smart_diffusion",
+  "aug_strategy": {
+    "aug_threshold": 10,
+    "num_variations": 3,
+    "classes_augmented": 172,
+    "classes_skipped": 17,
+    "augmented_copies": 948,
+    "original_synthetic": 700,
+    "total_synthetic": 1648
+  },
+  "real_train": 489,
+  "best_val_acc_top1": 6.666666666666667,
+  "test_loss": 4.527265224816664,
+  "test_acc_top1": 4.716981132075472,
+  "test_acc_top5": 21.69811320754717,
+  "test_acc_top10": 36.79245283018868,
+  "num_classes": 189,
+  "early_stopped": false,
+  "stopped_epoch": 2,
+  "train_samples": 2137,
+  "val_samples": 105,
+  "test_samples": 106,
+  "history": {
+    "train_loss": [
+      5.013958399241139,
+      4.674330863095802
+    ],
+    "train_acc": [
+      2.2461394478240524,
+      3.9775386055217594
+    ],
+    "val_loss": [
+      4.505348364512126,
+      4.555252093360537
+    ],
+    "val_acc_top1": [
+      6.666666666666667,
+      3.8095238095238093
+    ],
+    "val_acc_top5": [
+      19.047619047619047,
+      17.142857142857142
+    ],
+    "val_acc_top10": [
+      40.0,
+      40.0
+    ]
+  }
+}

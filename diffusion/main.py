@@ -47,11 +47,11 @@ def main():
     print(f"Loaded dataset with {len(synth_xrd)} samples")
 
     # Optional: Limit dataset size for testing
-    sample_limit = 250
-    synth_xrd = synth_xrd[:sample_limit]
-    real_xrd = real_xrd[:sample_limit]
-    global_temperature = global_temperature[:sample_limit]
-    print(f"Limited dataset to {sample_limit} samples")
+    #sample_limit = 250
+    #synth_xrd = synth_xrd[:sample_limit]
+    #real_xrd = real_xrd[:sample_limit]
+    #global_temperature = global_temperature[:sample_limit]
+    #print(f"Limited dataset to {sample_limit} samples")
 
     # Create dataset
     dataset = XRDTransformDataset(synth_xrd, real_xrd, global_temperature)

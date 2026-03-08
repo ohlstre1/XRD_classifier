@@ -1,0 +1,55 @@
+\subsection{Analysis of Diffusion-Based Augmentation for Classification}
+
+\subsubsection{Smart Augmentation: Classical Succeeds, Diffusion Falls Short}
+
+With class-aware targeting and gentle augmentation parameters, classical augmentation provides a modest but consistent improvement over the baseline (+0.55\% top-1, Table~\ref{tab:classification-comparison}).
+The improvement is small because the baseline already achieves 83.75\% top-1 accuracy with only 22\,652 training samples; the additional 19\,953 augmented patterns help primarily for the long tail of underrepresented classes.
+
+The diffusion-based augmentation, despite using the same class-aware strategy and identical training set size, reduces top-1 accuracy by 4.35\% relative to the baseline.
+This is a surprising result given the diffusion model's favourable reconstruction metrics at $t{=}0$ (RMSE 0.0103, Pearson $r = 0.872$; Table~\ref{tab:quant-metrics}, Figure~\ref{fig:overlay_comparison}).
+
+
+\subsubsection{Diffusion Model Limitations}
+
+The augmentation strategy requires non-zero timesteps ($t \in [0, 30]$) for diversity: at $t{=}0$ the model output is deterministic and provides no stochastic variation.
+However, the trained diffusion model is extremely sensitive to any perturbation beyond $t{=}0$:
+
+\begin{itemize}
+    \item \textbf{Output--loss mismatch.} The model uses a sigmoid activation on its output, bounding predictions to $[0, 1]$, while the training loss is formulated as noise prediction (MSE between predicted and true Gaussian noise). Since Gaussian noise is unbounded, the sigmoid saturates and clips the predicted noise, creating a systematic mismatch that compounds at higher timesteps.
+    \item \textbf{Batch normalisation sensitivity.} When the model is run in training mode (as required for augmentation with gradient-free forward passes), batch normalisation layers use per-batch statistics rather than the accumulated population statistics from training. This introduces additional instability, particularly for small batch sizes.
+    \item \textbf{Conditioning noise.} Even small perturbations to the DTW conditioning value ($\sigma{=}0.03$) degrade output quality, indicating that the model has overfit to exact conditioning values rather than learning a smooth mapping.
+\end{itemize}
+
+These issues create a fundamental conflict: diversity requires noise variation at non-zero timesteps, but the model cannot denoise reliably beyond $t{=}0$.
+The good $t{=}0$ reconstruction metrics are therefore misleading for augmentation purposes---they reflect a deterministic mapping with no stochastic component.
+
+
+\subsubsection{Classical Augmentation Advantages for XRD}
+
+The core hypothesis was that diffusion could learn the synthetic-to-real gap without manual parameter specification, removing the need for domain expertise in designing augmentation transforms.
+In practice, classical augmentation's physics-based constraints act as strong priors that preserve mineral-diagnostic features:
+
+\begin{itemize}
+    \item Peak broadening follows the Scherrer equation, ensuring that broadened peaks remain physically plausible.
+    \item Peak shifting is bounded to a few channels, preserving the crystallographic information encoded in peak positions.
+    \item Intensity variation and background noise are kept small, maintaining relative peak heights that are critical for phase identification.
+\end{itemize}
+
+These constraints ensure that augmented patterns remain valid XRD data.
+By contrast, the diffusion model's artefacts at non-zero timesteps can distort peak positions and relative intensities in ways that mislead the classifier.
+
+
+\subsubsection{Implications and Future Directions}
+
+The retrieval baseline's strong performance (92.17\% top-1) demonstrates that, for the high-quality AMCSD data, the synthetic-to-real gap is small enough that simple pattern matching suffices.
+This context is important: the augmentation strategies are most relevant for datasets with larger synthetic-to-real discrepancies, where the gap is too large for direct matching but could be bridged by learned transformations.
+
+Before revisiting diffusion-based augmentation, the model requires retraining with a corrected loss function that matches the sigmoid output activation. Specifically, the loss should operate on the reconstructed pattern directly (bounded $[0, 1]$) rather than on unbounded noise predictions. Several directions remain promising:
+
+\begin{itemize}
+    \item \textbf{Domain adaptation at $t{=}0$.} Rather than using the diffusion model for stochastic augmentation, apply it as a deterministic domain adapter: transform all synthetic patterns through the model at $t{=}0$ to make them more realistic, then train the classifier on the transformed data.
+    \item \textbf{Retrained diffusion model.} After correcting the sigmoid--noise mismatch, revisit augmentation at moderate timesteps ($t \in [20, 100]$) where the model should be able to reliably denoise.
+    \item \textbf{Hybrid approach.} Combine classical augmentation for controlled diversity with diffusion at $t{=}0$ for domain mapping: first apply classical transforms, then pass the result through the diffusion model to add realistic instrumental effects.
+\end{itemize}
+
+Until the diffusion model's training objective is corrected, classical augmentation with physics-based constraints remains the recommended approach for XRD pattern augmentation.

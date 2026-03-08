@@ -1,0 +1,56 @@
+{
+  "config": {
+    "data_path": "../../data/xrd_dataset_labeled_dtw_window.pt",
+    "train_ratio": 0.7,
+    "val_ratio": 0.15,
+    "epochs": 2,
+    "batch_size": 32,
+    "lr": 0.0001,
+    "dropout": 0.3,
+    "n_samples": 100,
+    "save_dir": "./models/resnet_classifier",
+    "disable_wandb": true,
+    "seed": 42,
+    "resume": null
+  },
+  "best_val_acc_top1": 40.0,
+  "test_loss": 3.4826533794403076,
+  "test_acc_top1": 33.333333333333336,
+  "test_acc_top5": 40.0,
+  "test_acc_top10": 40.0,
+  "num_classes": 34,
+  "augmentation": "none",
+  "num_variations": 1,
+  "synth_original": 100,
+  "synth_augmented": 100,
+  "real_train": 70,
+  "train_samples": 170,
+  "val_samples": 15,
+  "test_samples": 15,
+  "history": {
+    "train_loss": [
+      3.440193271636963,
+      3.252946040209602
+    ],
+    "train_acc": [
+      18.823529411764707,
+      36.470588235294116
+    ],
+    "val_loss": [
+      3.468951940536499,
+      3.396153211593628
+    ],
+    "val_acc_top1": [
+      40.0,
+      40.0
+    ],
+    "val_acc_top5": [
+      40.0,
+      40.0
+    ],
+    "val_acc_top10": [
+      53.333333333333336,
+      46.666666666666664
+    ]
+  }
+}

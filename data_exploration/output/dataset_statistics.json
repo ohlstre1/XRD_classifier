@@ -1,0 +1,58 @@
+{
+  "dataset": {
+    "total_patterns": 13325,
+    "unique_compounds": 3962,
+    "pattern_length": 4500
+  },
+  "class_distribution": {
+    "min_samples": 1,
+    "max_samples": 100,
+    "mean_samples": 3.363200403836446,
+    "median_samples": 1.0,
+    "std_samples": 8.049198081636163,
+    "classes_with_1_sample": 2375,
+    "classes_with_le_5_samples": 3537,
+    "classes_with_ge_50_samples": 26
+  },
+  "real_xrd": {
+    "min": 0.0,
+    "max": 1.0,
+    "mean": 0.0015391247579827905,
+    "std": 0.024435920640826225
+  },
+  "synth_xrd": {
+    "min": 0.0,
+    "max": 1.0,
+    "mean": 0.0017603621818125248,
+    "std": 0.025093091651797295
+  },
+  "dtw_distance": {
+    "min": 0.3577224612236023,
+    "max": 100.0,
+    "mean": 9.331990242004395,
+    "std": 9.033784866333008,
+    "median": 6.152918338775635
+  },
+  "top_compounds": {
+    "Iron": 100,
+    "Periclase": 100,
+    "Pyroxene-ideal": 100,
+    "Pyroxene": 100,
+    "Spinel": 100,
+    "Diopside": 99,
+    "Magnesioferrite": 99,
+    "Titanite": 98,
+    "Forsterite": 97,
+    "Gahnite": 93,
+    "Magnetite": 84,
+    "Enstatite": 83,
+    "Nickel": 77,
+    "Beryl": 71,
+    "Hercynite": 70,
+    "Pyrope": 68,
+    "Jadeite": 65,
+    "Staurolite": 65,
+    "Cobalt": 64,
+    "Lime": 58
+  }
+}

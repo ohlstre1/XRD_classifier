@@ -1,0 +1,75 @@
+{
+  "config": {
+    "data_path": "/home/bert-linux-2nd/Documents/XRD_classifier/data/xrd_dataset_labeled_dtw_window.pt",
+    "num_variations": 3,
+    "aug_threshold": 10,
+    "train_ratio": 0.7,
+    "val_ratio": 0.15,
+    "epochs": 120,
+    "batch_size": 32,
+    "lr": 0.0001,
+    "dropout": 0.3,
+    "n_samples": null,
+    "save_dir": "./models/smart_aug_comparison",
+    "disable_wandb": true,
+    "seed": 42,
+    "resume": "./models/smart_aug_comparison/last_checkpoint.pth"
+  },
+  "augmentation": "smart_class_aware",
+  "aug_strategy": {
+    "aug_threshold": 10,
+    "num_variations": 3,
+    "classes_augmented": 3703,
+    "classes_skipped": 259,
+    "augmented_copies": 19953,
+    "original_synthetic": 13325,
+    "total_synthetic": 33278
+  },
+  "aug_config": {
+    "peak_shifting_max": 3,
+    "broadening_prob": 0.5,
+    "broadening_intensity": [
+      0.05,
+      0.25
+    ],
+    "variation_range": [
+      0.9,
+      1.1
+    ],
+    "variation_prob": 0.5,
+    "noise_range": [
+      0.003,
+      0.01
+    ]
+  },
+  "real_train": 9327,
+  "best_val_acc_top1": 83.93393393393393,
+  "test_loss": 0.5982609708309173,
+  "test_acc_top1": 84.3,
+  "test_acc_top5": 96.5,
+  "test_acc_top10": 97.7,
+  "num_classes": 3962,
+  "train_samples": 42605,
+  "val_samples": 1998,
+  "test_samples": 2000,
+  "history": {
+    "train_loss": [
+      0.1159728835823565
+    ],
+    "train_acc": [
+      95.6437037906349
+    ],
+    "val_loss": [
+      0.7762022369258754
+    ],
+    "val_acc_top1": [
+      82.38238238238239
+    ],
+    "val_acc_top5": [
+      95.1951951951952
+    ],
+    "val_acc_top10": [
+      96.84684684684684
+    ]
+  }
+}

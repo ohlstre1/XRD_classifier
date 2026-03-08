@@ -1,0 +1,150 @@
+\subsection{Diffusion Model for XRD Pattern Analysis}
+
+This research employs a Denoising Diffusion Probabilistic Model (DDPM) \cite{ho2020denoising}
+as a conditional denoiser that transforms ideal Rietveld-derived XRD patterns into realistic approximations of laboratory measurements.
+The model learns the mapping from computed reference patterns to experimental data by conditioning on the dynamic time warping (DTW) distance between each synthetic--real pair, which serves as a proxy for the degree of structural and instrumental divergence.
+
+\subsubsection{Model Architecture}
+
+The implemented DDPM consists of two main phases: a forward diffusion process and a reverse denoising process similar to other diffusion models.
+In the forward diffusion phase, synthetic XRD patterns undergo controlled noise addition, including Gaussian noise and application-specific noise.
+This specific noise mimics the data augmentation patterns used in autoXRD \cite{szymanski2021probabilistic}, including peak shifting, peak intensity variations, peak removal, and increasing peak broadening. \\
+
+The diffusion process implemented follows a denoising diffusion probabilistic model (DDPM) adapted for X-ray diffraction (XRD) data.
+It introduces controlled noise to the data through a series of diffusion steps, progressively distorting the data from a clean state to a fully noisy state and subsequently learning to reverse this process.\\
+
+\subsubsection{Augmentation Strategy}
+
+The following section examines application-specific augmentation in detail, beginning with peak broadening of XRD peaks.
+Peak broadening due to crystallite size reduction is modelled using Scherrer's equation \cite{scherrer1918determination}:
+\begin{equation}
+\text{FWHM} = \frac{K \cdot \lambda}{L \cdot \cos(\theta)}
+\end{equation}
+Where:
+\begin{itemize}
+    \item \( \text{FWHM} \) is the full width at half maximum (in radians).
+    \item \( K \) is the shape factor (Scherrer constant, typically \(0.9\)).
+    \item \( \lambda \) is the X-ray wavelength (default \(1.54056\) Å, Cu $K\alpha$ radiation).
+    \item \( L \) is the crystallite size.
+    \item \( \theta \) is the Bragg angle (half of the measured \(2\theta\)).
+\end{itemize}
+
+The crystallite size \( L \) varies linearly with the diffusion timestep fraction \( t_{\text{frac}} \) as:
+\begin{equation}
+L(t) = L_{\text{max}} - t_{\text{frac}}(L_{\text{max}} - L_{\text{min}})
+\end{equation}
+with \(L_{\text{min}}\) and \(L_{\text{max}}\) being minimum and maximum crystallite sizes, respectively.
+
+
+Peak broadening is implemented via convolution with a Gaussian kernel whose width \( \sigma \) progressively increases as diffusion progresses:
+\begin{equation}
+\sigma = \sigma_{\text{base}}(t) \cdot \frac{L}{100}
+\end{equation}
+with \( \sigma_{\text{base}}(t) \) scaling from 0.02 (minimal broadening) to 1.0 (significant broadening) as:
+\begin{equation}
+\sigma_{\text{base}}(t) = 0.02 + t_{\text{frac}} \cdot 0.98
+\end{equation}
+The Gaussian kernel is:
+\begin{equation}
+k(x) = \frac{\exp\left(-\frac{1}{2}\left(\frac{x}{\sigma}\right)^2\right)}{\sum \exp\left(-\frac{1}{2}\left(\frac{x}{\sigma}\right)^2\right)}
+\end{equation}
+
+
+Additional augmentations introduced include:
+
+\begin{itemize}
+    \item \textbf{Peak Shifting}: Random shifting of spectra along the axis, increasing with timestep:
+    \begin{equation}
+    P_{\text{shift}}(t) = p_{\text{shift}} \cdot (1 + 2 \cdot t_{\text{frac}})
+    \end{equation}
+
+    \item \textbf{Peak Variations}: Random scaling of peak intensities within a dynamic range:
+    \begin{equation}
+    P_{\text{var}}(t) = p_{\text{var}} \cdot (1 + 2 \cdot t_{\text{frac}})
+    \end{equation}
+    Variation range:
+    \begin{equation}
+    \text{variation}_{\text{range}}(t) = \left[0.9 - 0.1 t_{\text{frac}}, 1.1 + 0.1 t_{\text{frac}}\right]
+    \end{equation}
+
+    \item \textbf{Removing Peaks}: Randomly zeroing peaks with probability:
+    \begin{equation}
+    P_{\text{remove}}(t) = p_{\text{remove}} \cdot (1 + 2 \cdot t_{\text{frac}})
+    \end{equation}
+    with the removal probability capped at 0.5.
+\end{itemize}
+
+\subsubsection{Forward Diffusion Process}
+The forward diffusion introduces noise at timestep \( t \) as:
+\begin{equation}
+x_t = \sqrt{\bar{\alpha}_t} \cdot x_{0}^{\text{aug}} + \sqrt{1 - \bar{\alpha}_t} \cdot \epsilon
+\end{equation}
+where:
+\begin{itemize}
+    \item \( \bar{\alpha}_t = \prod_{s=1}^{t}(1 - \beta_s) \) is the cumulative product of alphas.
+    \item \( x_{0}^{\text{aug}} \) is the augmented original data.
+    \item \( \epsilon \sim \mathcal{N}(0, I) \) is Gaussian noise.
+\end{itemize}
+
+This formulation provides a physically motivated framework for synthesising and analysing X-ray diffraction spectra under realistic, noise-varied conditions, improving the model's ability to generalise across different measurement qualities.
+
+
+
+\subsubsection{U-Net Noise Predictor}
+
+The reverse process uses a 1D U-Net architecture that predicts the noise component added during the forward pass.
+The network receives sinusoidal time embeddings concatenated with a DTW-based temperature conditioning signal, both projected to a shared hidden dimension of 16 channels through separate feed-forward networks with SiLU activations.
+
+The encoder comprises two downsampling levels (channels 16$\to$32$\to$64) with stride-2 convolutions, each level containing two stochastic residual blocks with GroupNorm and SiLU non-linearities.
+Self-attention layers are applied at levels one and two, capturing long-range correlations between distant peaks.
+The decoder mirrors the encoder with transposed convolutions and skip connections, and a final sigmoid activation constrains the output to [0,\,1].
+The full model has approximately 237\,000 trainable parameters.
+
+\subsubsection{Training Procedure}
+
+
+Two primary noise schedules are supported:
+\begin{itemize}
+    \item \textbf{Linear schedule}: Noise variance increases linearly from an initial value \( \beta_{\text{start}} \) to \( \beta_{\text{end}} \).
+    \item \textbf{Cosine schedule} (default): Noise variance follows a cosine curve, providing smoother transitions between timesteps.
+\end{itemize}
+
+The cosine schedule is computed as:
+\begin{equation}
+\alpha_{\text{cumprod}}(t) = \frac{\cos^2\left(\frac{\frac{t}{T} + s}{1 + s} \cdot \frac{\pi}{2}\right)}{\cos^2\left(\frac{s}{1 + s} \cdot \frac{\pi}{2}\right)}
+\end{equation}
+\begin{equation}
+\beta_t = 1 - \frac{\alpha_{\text{cumprod}}(t)}{\alpha_{\text{cumprod}}(t-1)}
+\end{equation}
+where \( T \) is the total number of timesteps and \( s = 0.008 \) is a small offset parameter.
+
+
+
+The model training involves multiple steps:
+
+\begin{itemize}
+    \item \textbf{Synthetic Data Diffusion:} Synthetic patterns derived from CIF files are subjected to a stochastic diffusion process.
+    Noise is gradually introduced to generate multiple noisy representations, improving the model's ability to generalise.
+    \item \textbf{Denoising Training:} A U-Net model is trained to reverse the diffusion process,
+    minimising the reconstruction error between original and denoised synthetic patterns.
+    \item \textbf{Fine-Tuning:} To bridge the gap between theoretical and experimental data,
+    the model undergoes fine-tuning using experimentally obtained XRD patterns,
+    allowing adaptation to real-world variations and noise characteristics.
+\end{itemize}
+
+\subsubsection{Inference}
+
+At inference the trained U-Net predicts the noise component $\hat{\epsilon}$ from a noisy input $x_t$.
+The clean signal is then recovered analytically:
+\begin{equation}
+\hat{x}_0 = \frac{x_t - \sqrt{1-\bar{\alpha}_t}\,\hat{\epsilon}}{\sqrt{\bar{\alpha}_t}}
+\label{eq:denoise}
+\end{equation}
+When $t=0$ the model acts as a direct mapping from ideal to realistic patterns, since the forward process contributes negligible noise at the first timestep.
+To fit within a single 6\,GB GPU, inference is performed in mini-batches of 64 samples.
+
+\subsubsection{Stochasticity and Variation Analysis}
+
+A key feature of the DDPM is its stochastic nature: for the same ideal input, different random noise draws in the forward process produce different denoised outputs, each representing a plausible realisation of the measured pattern.
+To quantify this variation we fix a single ideal input and apply the forward process at a small timestep ($t=50$) with $N=1\,000$ independent noise draws, denoising each one via Equation~\ref{eq:denoise}.
+The resulting ensemble of outputs is analysed for its mean, standard deviation band, and peak-position coefficient of variation (CV), with a threshold of CV~$<$~5\,\% defining acceptable positional stability.

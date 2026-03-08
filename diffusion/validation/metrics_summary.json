@@ -1,0 +1,20 @@
+{
+  "test_set_size": 2000,
+  "pattern_length": 4500,
+  "rmse_mean": 0.010261781285167672,
+  "rmse_std": 0.005931550746965333,
+  "pearson_mean": 0.8723254488466773,
+  "pearson_std": 0.1850597291742323,
+  "cross_corr_mean": 0.8723254492089036,
+  "cross_corr_std": 0.18505973078345178,
+  "stochastic_n_runs": 1000,
+  "stochastic_timestep": 50,
+  "stochastic_sample_idx": 873,
+  "stochastic_dtw_value": 4.664698123931885,
+  "mae_mean": 0.009179698303341866,
+  "mae_std": 0.0004667149332817644,
+  "num_peaks_detected": 14,
+  "cv_max_pct": 0.6704249961254292,
+  "cv_mean_pct": 0.2905140654531517,
+  "all_cv_below_5pct": true
+}

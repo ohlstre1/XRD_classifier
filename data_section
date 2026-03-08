@@ -1,0 +1,71 @@
+
+\section{Data}
+\label{sec:data}
+
+The availability of XRD data is limited, as detailed in this chapter. Two types of data are relevant: crystal structure files and powder diffraction files. The majority of available data consists of crystal structures stored in the CIF format \cite{hall1991crystallographic} (crystallographic information file). A CIF contains information about a crystal structure, including unit cell parameters (e.g., lattice dimensions, angles, volume) and symmetry information (e.g., space group and symmetry operations).
+It defines atomic positions (fractional coordinates, labels, occupancies, and thermal parameters) and may include reflection data from X-ray diffraction experiments (e.g., $hkl$ indices and intensities).
+The file also provides chemical and physical properties (e.g., molecular formula, density, and weight) and optional experimental details (e.g., radiation source, temperature, and data collection methods).
+Additionally, it contains validation statistics (e.g., R-factors, residual densities) to assess the quality of the structural model. Powder diffraction files (PDF) are rare; these data include at minimum a two-dimensional vector of $(I, 2\theta)$, and for single crystals, the $hkl$ indices may also be recorded. The following data sources are available:
+
+\begin{enumerate}
+\item \textbf{Crystallography Open Database} \cite{gravzulis2009crystallography}\cite{vaitkus2021validation} is released under CC0 (Public Domain), which permits unrestricted reuse, redistribution and commercial exploitation.  The database comprises exclusively Crystallographic Information Files (CIFs) containing atomic coordinates and symmetry operations for organic, inorganic, metal–organic frameworks and mineral structures, but does not include any powder diffraction (PDF) files.
+
+\item \textbf{Materials Project} \cite{10.1063/1.4812323} distributes its data under a Creative Commons Attribution 4.0 license (CC BY 4.0), allowing free research and commercial use provided that the Materials Project is properly credited.  Available content consists of density‐functional theory (DFT)–relaxed CIFs of crystal structures together with computed thermodynamic, electronic and mechanical properties; no standalone PDF‐format diffraction patterns are provided.
+
+\item \textbf{ICDD PDF Databases} (\emph{e.g.} PDF‐4, PDF‐5) \cite{zagorac2019recent} are proprietary collections licensed via annual or site subscriptions.  Subscribers may access and use both crystallographic and diffraction data (including Powder Diffraction File cards with high quality XRD patterns and figures‐of‐merit). Still, redistribution whether in CIF or PDF form is expressly prohibited.  
+
+\item \textbf{RRUFF Project} \cite{downs2006rruff} operates under an informational use only policy: all Raman, infrared and powder XRD data (delivered as CIFs for structures and PDF‐formatted spectral images) are freely searchable and analyzable for academic research and teaching.  However, any form of commercial use or redistribution requires explicit permission from the original data contributors.
+
+\item \textbf{American Mineralogist Crystal Structure Database (AMCSD)} \cite{downs2003amcsd} provides peer‐reviewed mineral CIFs and selected XRD data (in PDF form) freely for research and educational purposes.  Redistribution or incorporation into commercial products is permitted only upon approval by the Mineralogical Society of America and the Mineralogical Association of Canada.
+\end{enumerate}
+
+
+
+The main sources used in this research are the RRUFF database and the Crystallography Open Database, as these are the easily available and are allowed in research. In addition, we use American Mineralogist Crystal Structure Database \cite{downs2003amcsd} which has donated many of their CIFs to COD database. 
+The unique aspect is the combination of XRD files and CIF files, which are combined and refined. 
+The only drawback is that the experimental XRD files only include the peaks, which excludes peak shapes. These samples are also very high quality and very close to the synthetic counterpart.\\
+
+This leads us to dataset generation. The first dataset created is the XRD from the COD database. We downloaded all CIF files and created an XRD pattern combined with ID from Crystallography Open Database.
+The second database is the American Mineralogist Crystal Structure Database. We obtained CIFS and real XRD patterns. Then we generated XRD patterns with pymatgen \cite{Ong2013pymatgen}. 
+
+The third database is refined RRUFF values.
+
+
+
+\subsection{American mineralogist dataset generation (AMS), pre-data processing }
+
+The primary dataset used is obtained from AMS minerals, which totals 14325 pairs of CIF structure files matched to X-ray diffraction files.
+Out of these 1156 pairs were discarded because of an invalid CIF file without crystal structures, leaving a remaining 13325 files. \\
+
+The pymatgen XRDCalculator \cite{Ong2013pymatgen} function was used to create synthetic XRD from CIF files. For all data, the wavelength of 1.54184 Å, which is from common Cu K-alpha radiation. 
+This is the same as for the measured samples.
+Both the measured XRD and synthetic XRD only produce peaks. This means the peak width and the low resolution of the data are an inherent tradeoff.
+Thus, zero-padding between $2 \theta$ values between $ 0\deg$ and $ 90\deg$ with 0.02 intervals to a total of 4500 datapoints. 
+Intensities were also normalised between \[0,1\] by dividing all intensities by the largest value.
+
+\subsection{Class Similarity Analysis}
+
+To assess dataset suitability for classification, we analysed inter-class and intra-class similarity using cosine similarity on the generated XRD patterns.
+
+\textbf{Inter-class similarity:} Across 3,962 mineral classes, 7,846,741 unique pairs were evaluated. 98.4\% of pairs exhibit similarity below 0.10, indicating high class separability. Only 46 pairs (0.0006\%) exceed 0.90 similarity, of which 28 are duplicates arising from naming conventions (e.g., polymorphs or synonyms), affecting approximately 56 classes (1.4\% of total).
+
+\textbf{Intra-class similarity:} Raw pattern similarity within classes appears low (mean 0.18, median 0.07), attributable to pattern sparsity (0.11\% non-zero values) and minor peak position shifts between samples. Applying Gaussian smoothing ($\sigma=20$) to account for peak shifts yields mean similarity of 0.89, with 68.4\% of classes achieving $\geq$90\% internal consistency.
+
+These results confirm favourable conditions for classification: classes are well-separated with minimal overlap, and intra-class variation stems primarily from peak position shifts rather than fundamental pattern differences. The principal challenge is the large class count (3,962) rather than inter-class confusion. A robust classifier should tolerate minor peak shifts through appropriate preprocessing or architecture design.
+
+
+
+A significant number of crystals in these databases are duplicated or have broken symmetries \cite{cao2024simxrd}.
+A broken crystal lacks all the expected symmetry elements of its ideal structure.
+This issue must be considered, although it is largely handled by the pymatgen package, which filters out CIFs lacking the required symmetries.
+
+In addition, Lee et al. \cite{lee2023deep} identified at least eight misclassified entries where the $\alpha$, $\beta$, and $\gamma$ cell angle parameters deviated slightly from their expected values.
+For example, angles were recorded as $90.01\degree$, $90.3\degree$, or $89.93\degree$ instead of $90.00\degree$. The authors attribute these deviations to rigid regression fitting during Rietveld refinement.\\
+
+Severe background issues arise when dealing with low-quality experimental data, particularly from databases such as RRUFF \cite{lee2023deep}.\\
+
+
+
+
+
+\clearpage

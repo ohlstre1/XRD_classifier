@@ -1,0 +1,38 @@
+# XRD Classifier Dependencies
+# Install with: pip install -r requirements.txt
+
+# PyTorch nightly with CUDA 12.8 support (required for RTX 5070/Blackwell sm_120)
+--extra-index-url https://download.pytorch.org/whl/nightly/cu128
+torch
+torchvision
+torchaudio
+
+# Scientific computing
+numpy==2.1.2
+scipy==1.15.2
+scikit-learn==1.6.1
+pandas==2.2.3
+
+# Visualization
+matplotlib==3.10.1
+seaborn==0.13.2
+pillow==11.0.0
+
+# Configuration
+PyYAML==6.0.2
+pydantic==2.11.0
+
+# Experiment tracking
+wandb
+
+# Jupyter support
+ipython==9.6.0
+ipykernel==7.1.0
+ipywidgets==8.1.7
+
+# Utilities
+tqdm
+requests
+
+# CIF file processing (for XRD pattern generation)
+pymatgen

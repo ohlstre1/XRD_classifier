@@ -1,0 +1,37 @@
+{
+  "test_metrics": {
+    "Retrieval": {
+      "top1": 92.17,
+      "top5": 99.41,
+      "top10": 99.67,
+      "best_val": null,
+      "train_samples": null
+    },
+    "Baseline": {
+      "top1": 83.75,
+      "top5": 96.55,
+      "top10": 97.4,
+      "best_val": 83.38,
+      "train_samples": 22652
+    },
+    "Smart Classical Aug": {
+      "top1": 84.3,
+      "top5": 96.5,
+      "top10": 97.7,
+      "best_val": 83.93,
+      "train_samples": 42605
+    },
+    "Smart Diffusion Aug": {
+      "top1": 79.4,
+      "top5": 94.8,
+      "top10": 96.5,
+      "best_val": 77.63,
+      "train_samples": 42605
+    }
+  },
+  "training_epochs": {
+    "Baseline": 200,
+    "Smart Classical Aug": 119,
+    "Smart Diffusion Aug": 100
+  }
+}
